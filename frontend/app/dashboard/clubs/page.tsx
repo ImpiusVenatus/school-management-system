@@ -44,7 +44,7 @@ export default function ClubsPage() {
                     <td className="py-3 text-gray-600">{c.description ?? "—"}</td>
                     <td className="py-3">{c.academic_year_id ?? "—"}</td>
                     <td className="py-3">{c.is_active ? "Active" : "Inactive"}</td>
-                    <td className="py-3"><Link href={"/dashboard/clubs/" + c.id} className="text-[#7A4CFF] hover:underline">View</Link></td>
+                    <td className="py-3"><Link href={"/dashboard/clubs/" + c.id} className="text-[var(--foreground)] font-medium hover:underline">View</Link></td>
                   </tr>
                 ))}
               </tbody>

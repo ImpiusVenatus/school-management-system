@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
+import { SelectField } from "@/components/ui/SelectField";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -23,8 +25,8 @@ export default function NoticesPage() {
   const [error, setError] = useState("");
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-
   const isAdmin = Boolean(user?.is_superuser || user?.role === "admin");
+  const categoryOptions = [{ value: "", label: "All" }, ...categories.map((c) => ({ value: c.id, label: c.name }))];
 
   useEffect(() => {
     if (!token) return;
@@ -92,19 +94,20 @@ export default function NoticesPage() {
           {isAdmin && (
             <button type="button" onClick={() => setShowCategoryForm(true)} className="py-2 px-4 rounded-lg border border-gray-200">Add Category</button>
           )}
-          <button type="button" onClick={() => setShowForm(true)} className="py-2 px-4 rounded-lg bg-[#7A4CFF] text-white font-medium">New Notice</button>
+          <button type="button" onClick={() => setShowForm(true)} className="py-2 px-4 rounded-lg bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90">New Notice</button>
         </div>
       </div>
 
       <Card>
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="px-3 py-2 border rounded-lg w-48">
-            <option value="">All</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <SelectField
+            label="Category"
+            options={categoryOptions}
+            value={categoryId}
+            onChange={setCategoryId}
+            placeholder="All"
+            triggerClassName="w-48"
+          />
         </div>
         {loading ? <p className="text-gray-500">Loading...</p> : (
           <ul className="space-y-3">
@@ -122,53 +125,50 @@ export default function NoticesPage() {
         )}
       </Card>
 
-      {showForm && (
-        <Card>
-          <h3 className="font-semibold text-gray-900 mb-3">New Notice</h3>
-          <form onSubmit={createNotice} className="space-y-3 max-w-md">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-              <select required value={formCategory} onChange={(e) => setFormCategory(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                <option value="">Select</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
-              <input type="text" required value={formTitle} onChange={(e) => setFormTitle(e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
-              <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} className="w-full px-3 py-2 border rounded-lg" rows={3} />
-            </div>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={formPinned} onChange={(e) => setFormPinned(e.target.checked)} />
-              <span className="text-sm">Pinned</span>
-            </label>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <div className="flex gap-2">
-              <button type="submit" disabled={saving} className="py-2 px-4 rounded-lg bg-[#7A4CFF] text-white disabled:opacity-50">Save</button>
-              <button type="button" onClick={() => setShowForm(false)} className="py-2 px-4 rounded-lg border">Cancel</button>
-            </div>
-          </form>
-        </Card>
-      )}
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="New Notice" size="md">
+        <form onSubmit={createNotice} className="space-y-3">
+          <div>
+            <SelectField
+              label="Category"
+              required
+              options={categories.map((c) => ({ value: c.id, label: c.name }))}
+              value={formCategory}
+              onChange={setFormCategory}
+              placeholder="Select category"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input type="text" required value={formTitle} onChange={(e) => setFormTitle(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-neutral-900/10" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
+            <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-neutral-900/10" rows={3} />
+          </div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={formPinned} onChange={(e) => setFormPinned(e.target.checked)} />
+            <span className="text-sm">Pinned</span>
+          </label>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2 pt-2">
+            <button type="submit" disabled={saving || !formCategory} className="py-2 px-4 rounded-lg bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50">Save</button>
+            <button type="button" onClick={() => setShowForm(false)} className="py-2 px-4 rounded-lg border border-gray-200">Cancel</button>
+          </div>
+        </form>
+      </Modal>
 
-      {showCategoryForm && isAdmin && (
-        <Card>
-          <h3 className="font-semibold text-gray-900 mb-3">New Category</h3>
-          <form onSubmit={createCategory} className="flex gap-2 items-end">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input type="text" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} className="px-3 py-2 border rounded-lg w-64" />
-            </div>
-            <button type="submit" disabled={saving} className="py-2 px-4 rounded-lg bg-[#7A4CFF] text-white disabled:opacity-50">Add</button>
-            <button type="button" onClick={() => setShowCategoryForm(false)} className="py-2 px-4 rounded-lg border">Cancel</button>
-          </form>
-        </Card>
-      )}
+      <Modal open={showCategoryForm && isAdmin} onClose={() => setShowCategoryForm(false)} title="New Category" size="sm">
+        <form onSubmit={createCategory} className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-neutral-900/10" />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="submit" disabled={saving || !newCategoryName.trim()} className="py-2 px-4 rounded-lg bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50">Add</button>
+            <button type="button" onClick={() => setShowCategoryForm(false)} className="py-2 px-4 rounded-lg border border-gray-200">Cancel</button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
+import { AddTeacherForm } from "@/components/forms/AddTeacherForm";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -20,6 +22,7 @@ export default function TeachersPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("");
   const [loading, setLoading] = useState(true);
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -37,7 +40,30 @@ export default function TeachersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Teachers</h1>
-        <Link href="/dashboard/teachers/new" className="py-2 px-4 rounded-lg bg-[#7A4CFF] text-white font-medium hover:bg-[#6a3ee8]">Add Teacher</Link>
+        <button
+          type="button"
+          onClick={() => setAddModalOpen(true)}
+          className="py-2 px-4 rounded-lg bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90"
+        >
+          Add Teacher
+        </button>
+        <Modal open={addModalOpen} onClose={() => setAddModalOpen(false)} title="Add Teacher" size="sm">
+          <AddTeacherForm
+            onSuccess={() => {
+              setAddModalOpen(false);
+              if (token) {
+                const params = new URLSearchParams();
+                params.set("limit", "200");
+                if (search) params.set("search", search);
+                if (department) params.set("department", department);
+                api<Instructor[]>("/api/instructors?" + params.toString(), { token })
+                  .then(setTeachers)
+                  .catch(() => setTeachers([]));
+              }
+            }}
+            onCancel={() => setAddModalOpen(false)}
+          />
+        </Modal>
       </div>
       <Card>
         <div className="flex flex-wrap gap-4 mb-4">
@@ -62,7 +88,7 @@ export default function TeachersPage() {
                   <td className="py-3">{t.employee_id ?? "—"}</td>
                   <td className="py-3">{t.department ?? "—"}</td>
                   <td className="py-3"><span className={t.status === "Active" ? "text-green-600" : "text-gray-500"}>{t.status}</span></td>
-                  <td className="py-3"><Link href={"/dashboard/teachers/" + t.id} className="text-[#7A4CFF] hover:underline">View</Link></td>
+                  <td className="py-3"><Link href={"/dashboard/teachers/" + t.id} className="text-[var(--foreground)] font-medium hover:underline">View</Link></td>
                 </tr>
               ))}
             </tbody>

@@ -44,7 +44,7 @@ export default function ClubDetailPage() {
     }).finally(() => setLoading(false));
   }, [token, id, yearFilter]);
 
-  if (!club) return <div className="text-gray-500">Club not found. <Link href="/dashboard/clubs" className="text-[#7A4CFF]">Back</Link></div>;
+  if (!club) return <div className="text-gray-500">Club not found. <Link href="/dashboard/clubs" className="text-[var(--foreground)] font-medium">Back</Link></div>;
 
   return (
     <div className="space-y-6">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Card } from "@/components/ui/Card";
+import { SelectField } from "@/components/ui/SelectField";
 import { api, apiFormData, getApiUrl } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -91,25 +92,27 @@ export default function FilesPage() {
       <Card>
         <div className="flex flex-wrap gap-4 mb-4 items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Filter by category</label>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-3 py-2 border rounded-lg w-40">
-              <option value="">All</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <SelectField
+              label="Filter by category"
+              options={[{ value: "", label: "All" }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]}
+              value={category}
+              onChange={setCategory}
+              placeholder="All"
+              triggerClassName="w-40"
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Upload (category)</label>
-            <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)} className="px-3 py-2 border rounded-lg w-40">
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <SelectField
+              label="Upload (category)"
+              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+              value={uploadCategory}
+              onChange={setUploadCategory}
+              triggerClassName="w-40"
+            />
           </div>
           <div>
             <input ref={fileInputRef} type="file" onChange={handleUpload} disabled={uploading} className="hidden" />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="py-2 px-4 rounded-lg bg-[#7A4CFF] text-white font-medium disabled:opacity-50">
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="py-2 px-4 rounded-lg bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50">
               {uploading ? "Uploading..." : "Choose file to upload"}
             </button>
           </div>
@@ -133,7 +136,7 @@ export default function FilesPage() {
                   <td className="py-3">{f.file_size != null ? (f.file_size / 1024).toFixed(1) + " KB" : "—"}</td>
                   <td className="py-3">{f.created_at ? new Date(f.created_at).toLocaleString() : "—"}</td>
                   <td className="py-3 flex gap-2">
-                    <button type="button" onClick={() => handleDownload(f)} className="text-[#7A4CFF] hover:underline">Download</button>
+                    <button type="button" onClick={() => handleDownload(f)} className="text-[var(--foreground)] font-medium hover:underline">Download</button>
                     <button type="button" onClick={() => deleteFile(f.id)} className="text-red-600 hover:underline">Delete</button>
                   </td>
                 </tr>
