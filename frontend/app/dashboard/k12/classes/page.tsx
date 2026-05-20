@@ -3,8 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-/** Program-mode class setup moved to Settings → Classes & sections */
-export default function StudentGroupsRedirectPage() {
+export default function K12ClassesRedirectPage() {
   const router = useRouter();
   useEffect(() => {
     router.replace("/dashboard/settings?tab=classes");
