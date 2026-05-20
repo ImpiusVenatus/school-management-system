@@ -1,21 +1,48 @@
 import { ReactNode } from "react";
+import { Sparkline } from "./Sparkline";
 
 interface DataCardProps {
   title: string;
   value: string | number;
-  icon: ReactNode;
-  iconBg?: string;
+  subtitle?: string;
+  icon?: ReactNode;
   className?: string;
+  showSparkline?: boolean;
 }
 
-export function DataCard({ title, value, icon, iconBg = "bg-[#7A4CFF]/10", className = "" }: DataCardProps) {
+export function DataCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  className = "",
+  showSparkline = true,
+}: DataCardProps) {
   return (
-    <div className={"rounded-xl bg-white p-6 shadow-sm border border-gray-100 flex items-center justify-between " + className}>
-      <div>
-        <p className="text-sm font-medium text-gray-500">{title}</p>
-        <p className="text-2xl font-bold mt-1">{value}</p>
+    <div
+      className={`rounded-xl bg-white border border-[var(--border)] p-5 flex flex-col justify-between min-h-[7.5rem] ${className}`}
+    >
+      <p className="text-[11px] font-semibold tracking-wide text-[var(--muted-light)] uppercase">
+        {title}
+      </p>
+      <div className="mt-3 flex items-end justify-between gap-2">
+        <div>
+          <p className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">
+            {value}
+          </p>
+          {subtitle && (
+            <p className="text-xs text-[var(--muted)] mt-1">{subtitle}</p>
+          )}
+        </div>
+        <div className="flex items-end gap-2">
+          {icon && (
+            <div className="hidden sm:flex rounded-lg p-2 bg-[var(--primary-light)] text-[var(--muted)]">
+              {icon}
+            </div>
+          )}
+          {showSparkline && <Sparkline />}
+        </div>
       </div>
-      <div className={"rounded-lg p-3 " + iconBg + " text-[#7A4CFF]"}>{icon}</div>
     </div>
   );
 }

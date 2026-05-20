@@ -1,16 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Instrument_Serif } from "next/font/google";
 import { useAuth } from "@/contexts/AuthContext";
+
+const instrumentSerif = Instrument_Serif({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-instrument-serif",
+});
+
+type RoleTab = "staff" | "teacher" | "student" | "guardian";
+
+const ROLE_TABS: { id: RoleTab; label: string }[] = [
+  { id: "staff", label: "Staff" },
+  { id: "teacher", label: "Teacher" },
+  { id: "student", label: "Student" },
+  { id: "guardian", label: "Guardian" },
+];
+
+const ROLE_HINTS: Record<RoleTab, string> = {
+  staff: "Administrators and office staff use your school-issued email.",
+  teacher: "Teachers sign in with the email linked to their instructor profile.",
+  student: "Students use the email address on their enrollment record.",
+  guardian: "Guardians sign in with the address they registered with the school.",
+};
+
+function GridPattern() {
+  return (
+    <div
+      className="absolute inset-0 opacity-[0.35]"
+      style={{
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)
+        `,
+        backgroundSize: "48px 48px",
+      }}
+    />
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg className="w-4 h-4 shrink-0 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-13.5a2.25 2.25 0 01-2.25-2.25V6.75m16.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.34 0l-7.5-4.615a2.25 2.25 0 01-1.07-1.916V6.75m16.5 0h-15" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg className="w-4 h-4 shrink-0 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 00-9-4.5 4.5 4.5 0 00-9 4.5v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25h10.5z" />
+    </svg>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, setupStatus, checkSetup } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<RoleTab>("staff");
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    checkSetup();
+  }, [checkSetup]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,29 +81,178 @@ export default function LoginPage() {
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Sign in failed. Check your email and password.");
     } finally {
       setLoading(false);
     }
   }
 
+  const displaySchool = setupStatus?.school_name?.trim() || "School Management System";
+  const initials = displaySchool
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase() || "SMS";
+
   return (
-    <div className="min-h-screen bg-[#F8F8FC] flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Login</h1>
-        <p className="text-gray-500 text-sm mb-6">Sign in with your admin account.</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7A4CFF]" />
+    <div className={`min-h-screen flex flex-col lg:flex-row ${instrumentSerif.variable}`}>
+      {/* Left — brand panel */}
+      <div className="relative flex flex-col justify-between bg-[#0c0c0c] text-white px-8 py-10 lg:px-12 lg:py-12 lg:w-[48%] lg:min-h-screen overflow-hidden">
+        <GridPattern />
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0">
+            <span className="text-[#0c0c0c] font-semibold text-lg font-serif">{initials}</span>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7A4CFF]" />
+          <span className="text-sm font-medium tracking-tight text-white/95">{displaySchool}</span>
+        </div>
+
+        <div className="relative z-10 flex-1 flex flex-col justify-center py-16 lg:py-0 max-w-md">
+          <h1
+            className={`${instrumentSerif.className} text-4xl sm:text-5xl lg:text-[3.25rem] leading-[1.15] text-white font-normal`}
+          >
+            A quieter way to run the school day.
+          </h1>
+          <p className="mt-6 text-sm sm:text-base text-white/55 leading-relaxed max-w-sm">
+            One system for admissions, attendance, timetables, exams, and fees — built for the people who keep the school running.
+          </p>
+        </div>
+
+        <div className="relative z-10 flex justify-between text-[11px] text-white/40 tracking-wide">
+          <span>SMS · v1.0</span>
+          <span>Single-school · Open source</span>
+        </div>
+      </div>
+
+      {/* Right — sign in */}
+      <div className="flex-1 flex flex-col justify-center bg-[#f7f5f0] px-6 py-12 sm:px-12 lg:px-16 lg:py-16 lg:min-h-screen">
+        <div className="w-full max-w-md mx-auto">
+          <p className="text-[11px] font-semibold tracking-[0.2em] text-neutral-400 uppercase mb-3">Sign in</p>
+          <h2 className="text-3xl sm:text-4xl font-bold text-neutral-900 tracking-tight">Welcome back.</h2>
+          <p className="mt-3 text-sm text-neutral-500 leading-relaxed">{ROLE_HINTS[role]}</p>
+
+          {/* Role pills */}
+          <div className="mt-8 flex flex-wrap gap-2">
+            {ROLE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setRole(tab.id)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors border ${
+                  role === tab.id
+                    ? "bg-neutral-900 text-white border-neutral-900"
+                    : "bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button type="submit" disabled={loading} className="w-full py-2.5 rounded-lg bg-[#7A4CFF] text-white font-medium hover:bg-[#6a3ee8] disabled:opacity-50">{loading ? "Signing in..." : "Sign In"}</button>
-        </form>
+
+          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+            <div>
+              <label htmlFor="email" className="block text-xs font-medium text-neutral-500 mb-1.5">
+                Email
+              </label>
+              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
+                <MailIcon />
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@school.edu"
+                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="password" className="block text-xs font-medium text-neutral-500">
+                  Password
+                </label>
+                <span className="text-xs text-neutral-400 cursor-not-allowed" title="Contact your school administrator">
+                  Forgot?
+                </span>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
+                <LockIcon />
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={keepSignedIn}
+                onChange={(e) => setKeepSignedIn(e.target.checked)}
+                className="w-4 h-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
+              />
+              <span className="text-sm text-neutral-600">Keep me signed in on this device</span>
+            </label>
+
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3.5 rounded-xl bg-neutral-900 text-white text-sm font-semibold hover:bg-neutral-800 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            >
+              {loading ? "Signing in…" : "Sign in"}
+              {!loading && <span aria-hidden>→</span>}
+            </button>
+          </form>
+
+          {setupStatus && !setupStatus.configured ? (
+            <div className="mt-8 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4">
+              <p className="text-sm font-medium text-neutral-800">First-time setup</p>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                No school has been configured yet. Create your institution and the first administrator account.
+              </p>
+              <Link
+                href="/setup"
+                className="inline-block mt-3 text-sm font-semibold text-neutral-900 hover:underline"
+              >
+                Complete school setup →
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-8 rounded-xl border border-neutral-200 bg-white/60 px-4 py-4">
+              <p className="text-sm text-neutral-600 leading-relaxed">
+                <span className="font-medium text-neutral-800">Secure sign-in.</span> Your session uses encrypted tokens. Staff manage roles and permissions under Settings → Roles.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-10 flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-400">
+            <span>EN</span>
+            <span className="text-neutral-300">·</span>
+            <Link href="/dashboard" className="hover:text-neutral-600">
+              Dashboard
+            </Link>
+            <span className="text-neutral-300">·</span>
+            <span className="text-neutral-400">Help</span>
+            <span className="text-neutral-300">·</span>
+            <span className="text-neutral-400">Privacy</span>
+            <span className="text-neutral-300">·</span>
+            <span className="text-neutral-400">Terms</span>
+          </div>
+        </div>
       </div>
     </div>
   );
