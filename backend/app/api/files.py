@@ -86,8 +86,9 @@ def list_files(
 def serve_file(
     file_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Stream file for download; auth optional for public serving or require auth."""
+    """Stream file for download (auth required)."""
     rec = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="File not found")

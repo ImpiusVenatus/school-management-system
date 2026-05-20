@@ -1,5 +1,5 @@
 """Assessment Group, Criteria, Plan, Result, Grading Scale."""
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -31,6 +31,7 @@ class GradingScale(Base):
     id = Column(String, primary_key=True, index=True)
     grading_scale_name = Column(String, unique=True, nullable=False)
     description = Column(Text, nullable=True)
+    is_default = Column(Boolean, default=False)
     docstatus = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -48,6 +49,7 @@ class GradingScaleInterval(Base):
     grade_code = Column(String, nullable=False)
     threshold = Column(Float, default=0)  # percentage
     grade_description = Column(Text, nullable=True)
+    gpa_points = Column(Float, nullable=True)
     idx = Column(Integer, default=0)
 
     grading_scale = relationship("GradingScale", back_populates="intervals")

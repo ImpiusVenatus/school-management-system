@@ -105,6 +105,65 @@ def get_student_group(
     return _group_to_response(g, db)
 
 
+@router.patch("/{group_id}", response_model=StudentGroupResponse)
+def update_student_group(
+    group_id: str,
+    body: StudentGroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    g = db.query(StudentGroup).filter(StudentGroup.id == group_id).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Student group not found")
+    if body.student_group_name is not None:
+        existing = db.query(StudentGroup).filter(
+            StudentGroup.student_group_name == body.student_group_name,
+            StudentGroup.id != group_id,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Student group name already exists")
+        g.student_group_name = body.student_group_name
+    if body.academic_term_id is not None:
+        g.academic_term_id = body.academic_term_id
+    if body.max_strength is not None:
+        g.max_strength = body.max_strength
+    if body.disabled is not None:
+        g.disabled = body.disabled
+    if body.students is not None:
+        db.query(StudentGroupStudent).filter(StudentGroupStudent.parent_id == group_id).delete()
+        for i, s in enumerate(body.students):
+            db.add(StudentGroupStudent(
+                id=new_id("SGS"), parent_id=group_id, student_id=s.student_id,
+                student_name=s.student_name, group_roll_number=s.group_roll_number,
+                active=s.active, idx=i,
+            ))
+    if body.instructors is not None:
+        db.query(StudentGroupInstructor).filter(StudentGroupInstructor.parent_id == group_id).delete()
+        for i, inst in enumerate(body.instructors):
+            db.add(StudentGroupInstructor(
+                id=new_id("SGI"), parent_id=group_id, instructor_id=inst.instructor_id, idx=i,
+            ))
+    db.commit()
+    db.refresh(g)
+    return _group_to_response(g, db)
+
+
+@router.delete("/{group_id}")
+def delete_student_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    g = db.query(StudentGroup).filter(StudentGroup.id == group_id).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Student group not found")
+    db.query(StudentGroupStudent).filter(StudentGroupStudent.parent_id == group_id).delete()
+    db.query(StudentGroupInstructor).filter(StudentGroupInstructor.parent_id == group_id).delete()
+    db.delete(g)
+    db.commit()
+    return {"message": "Deleted"}
+
+
 @router.get("/{group_id}/students", response_model=list[dict])
 def get_student_group_students(
     group_id: str,

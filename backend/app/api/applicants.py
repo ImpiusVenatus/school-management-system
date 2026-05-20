@@ -120,6 +120,58 @@ def create_applicant(
     )
 
 
+@router.patch("/{applicant_id}", response_model=StudentApplicantResponse)
+def update_applicant(
+    applicant_id: str,
+    body: StudentApplicantUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    app = db.query(StudentApplicant).filter(StudentApplicant.id == applicant_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+    if app.application_status == "Admitted":
+        raise HTTPException(status_code=400, detail="Cannot modify admitted applicant")
+    for field in (
+        "application_status", "first_name", "middle_name", "last_name",
+        "student_email_id", "student_mobile_number", "date_of_birth", "gender",
+        "blood_group", "nationality", "address_line_1", "address_line_2",
+        "city", "state", "pincode", "country",
+    ):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(app, field, val)
+    if any(getattr(body, f) is not None for f in ("first_name", "middle_name", "last_name")):
+        app.title = make_student_name(app.first_name, app.middle_name, app.last_name) or app.first_name
+    db.commit()
+    db.refresh(app)
+    return StudentApplicantResponse(
+        id=app.id,
+        first_name=app.first_name,
+        middle_name=app.middle_name,
+        last_name=app.last_name,
+        title=app.title,
+        program_id=app.program_id,
+        academic_year_id=app.academic_year_id,
+        academic_term_id=app.academic_term_id,
+        student_category_id=app.student_category_id,
+        student_email_id=app.student_email_id,
+        student_mobile_number=app.student_mobile_number,
+        date_of_birth=app.date_of_birth,
+        gender=app.gender,
+        blood_group=app.blood_group,
+        nationality=app.nationality,
+        address_line_1=app.address_line_1,
+        address_line_2=app.address_line_2,
+        city=app.city,
+        state=app.state,
+        pincode=app.pincode,
+        country=app.country,
+        application_date=app.application_date,
+        application_status=app.application_status,
+    )
+
+
 @router.post("/enroll/{applicant_id}")
 def enroll_student(
     applicant_id: str,

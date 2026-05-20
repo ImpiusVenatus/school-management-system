@@ -26,6 +26,9 @@ from app.models.education_settings import EducationSettings
 from app.models.file_record import FileRecord
 from app.models.club import Club, ClubModerator, ClubMember, ClubPost
 from app.models.notice import NoticeCategory, Notice
+from app.models.rbac import Role, Permission, RefreshToken, role_permissions, user_roles
+from app.models.k12 import K12Class, K12Section, K12Subject, K12ClassSubject, K12StudentEnrollment, K12TeacherSubject
+from app.models.invoice import Invoice, InvoiceItem, Payment
 
 __all__ = [
     "Base",
@@ -73,4 +76,18 @@ __all__ = [
     "ClubPost",
     "NoticeCategory",
     "Notice",
+    "Role",
+    "Permission",
+    "RefreshToken",
+    "role_permissions",
+    "user_roles",
+    "K12Class",
+    "K12Section",
+    "K12Subject",
+    "K12ClassSubject",
+    "K12StudentEnrollment",
+    "K12TeacherSubject",
+    "Invoice",
+    "InvoiceItem",
+    "Payment",
 ]

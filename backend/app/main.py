@@ -8,6 +8,7 @@ from app.api import auth, students, programs, courses, enrollment, academic
 from app.api import student_groups, course_schedule, attendance, leave, fees, assessment
 from app.api import instructors, rooms, guardians, applicants, files, setup, clubs, notices
 from app.api import settings as settings_api
+from app.api import k12, invoices, rbac
 
 config = get_settings()
 app = FastAPI(title=config.APP_NAME, version="1.0.0")
@@ -43,6 +44,9 @@ app.include_router(settings_api.router, prefix=api_prefix)
 app.include_router(setup.router, prefix=api_prefix)
 app.include_router(clubs.router, prefix=api_prefix)
 app.include_router(notices.router, prefix=api_prefix)
+app.include_router(k12.router, prefix=api_prefix)
+app.include_router(invoices.router, prefix=api_prefix)
+app.include_router(rbac.router, prefix=api_prefix)
 
 
 @app.get("/")
@@ -56,7 +60,9 @@ def health():
 
 
 def init_db():
-    """Create tables (for first run or dev). Use Alembic in production."""
+    """Create tables for local dev only. Production must use: alembic upgrade head."""
+    if config.ENVIRONMENT == "production":
+        raise RuntimeError("init_db() is disabled in production. Run: alembic upgrade head")
     Base.metadata.create_all(bind=engine)
 
 

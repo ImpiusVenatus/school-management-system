@@ -7,6 +7,7 @@ class GradingScaleIntervalItem(BaseModel):
     grade_code: str
     threshold: float
     grade_description: str | None = None
+    gpa_points: float | None = None
 
 
 class GradingScaleBase(BaseModel):
@@ -16,11 +17,20 @@ class GradingScaleBase(BaseModel):
 
 class GradingScaleCreate(GradingScaleBase):
     intervals: list[GradingScaleIntervalItem]
+    is_default: bool = False
+
+
+class GradingScaleUpdate(BaseModel):
+    grading_scale_name: str | None = None
+    description: str | None = None
+    is_default: bool | None = None
+    intervals: list[GradingScaleIntervalItem] | None = None
 
 
 class GradingScaleResponse(GradingScaleBase):
     id: str
     intervals: list[GradingScaleIntervalItem] = []
+    is_default: bool = False
     docstatus: int = 0
 
     class Config:

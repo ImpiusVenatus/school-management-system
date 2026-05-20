@@ -1,14 +1,119 @@
-"""Fee Structure, Fee Schedule API (get_fee_structure, get_fee_components, get_fee_schedule)."""
+"""Fee Structure, Fee Schedule, Fee Categories API."""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import FeeStructure, FeeComponent, FeeSchedule, FeeScheduleStudentGroup
+from app.models import FeeStructure, FeeComponent, FeeSchedule, FeeScheduleStudentGroup, FeeCategory
 from app.schemas.fee import FeeStructureCreate, FeeStructureResponse, FeeScheduleCreate, FeeScheduleResponse, FeeComponentItem
 from app.core.auth import get_current_user
 from app.models import User
 from app.services.id_gen import new_id
 
 router = APIRouter(prefix="/fees", tags=["fees"])
+
+
+class FeeCategoryResponse(BaseModel):
+    id: str
+    name: str
+    code: str | None = None
+    default_frequency: str | None = None
+    taxable_percent: float | None = None
+    refundable: bool = False
+    is_active: bool = True
+    description: str | None = None
+    structure_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class FeeCategoryCreate(BaseModel):
+    name: str
+    code: str | None = None
+    default_frequency: str | None = "Monthly"
+    taxable_percent: float | None = None
+    refundable: bool = False
+    description: str | None = None
+
+
+class FeeCategoryUpdate(BaseModel):
+    name: str | None = None
+    code: str | None = None
+    default_frequency: str | None = None
+    taxable_percent: float | None = None
+    refundable: bool | None = None
+    is_active: bool | None = None
+    description: str | None = None
+
+
+def _category_response(cat: FeeCategory, db: Session) -> FeeCategoryResponse:
+    used = db.query(FeeComponent).filter(FeeComponent.fees_category_id == cat.id).count()
+    return FeeCategoryResponse(
+        id=cat.id,
+        name=cat.name,
+        code=cat.code,
+        default_frequency=cat.default_frequency,
+        taxable_percent=cat.taxable_percent,
+        refundable=bool(cat.refundable),
+        is_active=bool(cat.is_active),
+        description=cat.description,
+        structure_count=used,
+    )
+
+
+@router.get("/categories", response_model=list[FeeCategoryResponse])
+def list_fee_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = db.query(FeeCategory).order_by(FeeCategory.name).all()
+    return [_category_response(c, db) for c in rows]
+
+
+@router.post("/categories", response_model=FeeCategoryResponse)
+def create_fee_category(
+    body: FeeCategoryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = new_id("FCAT")
+    row = FeeCategory(
+        id=cid,
+        name=body.name.strip(),
+        code=(body.code or body.name[:3]).upper().strip()[:20],
+        default_frequency=body.default_frequency,
+        taxable_percent=body.taxable_percent,
+        refundable=body.refundable,
+        description=body.description,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _category_response(row, db)
+
+
+@router.patch("/categories/{category_id}", response_model=FeeCategoryResponse)
+def update_fee_category(
+    category_id: str,
+    body: FeeCategoryUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.query(FeeCategory).filter(FeeCategory.id == category_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Fee category not found")
+    for field in ("name", "code", "default_frequency", "taxable_percent", "description"):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(row, field, val.strip() if isinstance(val, str) else val)
+    if body.refundable is not None:
+        row.refundable = body.refundable
+    if body.is_active is not None:
+        row.is_active = body.is_active
+    db.commit()
+    db.refresh(row)
+    return _category_response(row, db)
 
 
 @router.get("/structures", response_model=list[FeeStructureResponse])

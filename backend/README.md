@@ -85,3 +85,8 @@ All other `/api/*` routes require `Authorization: Bearer <token>`.
 alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
+
+```bash
+python scripts/reset_db.py        # asks you to type "reset"
+python scripts/reset_db.py --yes  # no prompt
+```
