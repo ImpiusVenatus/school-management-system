@@ -12,6 +12,7 @@ class AcademicYear(Base):
     academic_year_name = Column(String, unique=True, nullable=False)
     year_start_date = Column(Date, nullable=False)
     year_end_date = Column(Date, nullable=False)
+    status = Column(String(20), default="closed")  # active | closed | archived
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
