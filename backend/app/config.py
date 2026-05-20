@@ -12,10 +12,12 @@ class Settings(BaseSettings):
     # JWT - in-house auth only (no Google/third-party)
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     APP_NAME: str = "School Management System"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"
 
     # File storage (local path; replace with S3 backend later if needed)
     STORAGE_PATH: str = "uploads"

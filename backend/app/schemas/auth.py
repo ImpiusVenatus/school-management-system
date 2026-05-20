@@ -4,7 +4,12 @@ from pydantic import BaseModel, EmailStr
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
+
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class TokenPayload(BaseModel):
@@ -30,6 +35,8 @@ class UserResponse(BaseModel):
     is_active: bool
     role: str
     is_superuser: bool = False
+    roles: list[str] = []
+    permission_codes: list[str] = []
 
     class Config:
         from_attributes = True

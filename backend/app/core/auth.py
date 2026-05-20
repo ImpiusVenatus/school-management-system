@@ -39,6 +39,23 @@ def get_current_user(
     return user
 
 
+def require_permission(code: str):
+    from app.core.permissions import user_has_permission
+
+    def checker(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        if not user_has_permission(db, current_user, code):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: {code}",
+            )
+        return current_user
+
+    return checker
+
+
 def get_current_user_optional(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
