@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Instrument_Serif } from "next/font/google";
 import { useAuth } from "@/contexts/AuthContext";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { IosArrowButton } from "@/components/ui/IosArrowButton";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
@@ -97,49 +99,56 @@ export default function LoginPage() {
     .toUpperCase() || "SMS";
 
   return (
-    <div className={`min-h-screen flex flex-col lg:flex-row ${instrumentSerif.variable}`}>
+    <div
+      className={`min-h-screen min-h-[100dvh] flex flex-col lg:flex-row ${instrumentSerif.variable}`}
+    >
       {/* Left — brand panel */}
-      <div className="relative flex flex-col justify-between bg-[#0c0c0c] text-white px-8 py-10 lg:px-12 lg:py-12 lg:w-[48%] lg:min-h-screen overflow-hidden">
+      <div className="relative flex flex-col justify-between bg-[#0c0c0c] text-white px-5 py-8 sm:px-8 sm:py-10 lg:px-12 lg:py-12 lg:w-[48%] lg:min-h-screen lg:shrink-0 overflow-hidden">
         <GridPattern />
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0">
-            <span className="text-[#0c0c0c] font-semibold text-lg font-serif">{initials}</span>
+        <div className="relative z-10 flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-white flex items-center justify-center shrink-0">
+            <span className="text-[#0c0c0c] font-semibold text-base sm:text-lg font-serif">{initials}</span>
           </div>
-          <span className="text-sm font-medium tracking-tight text-white/95">{displaySchool}</span>
+          <span className="text-sm font-medium tracking-tight text-white/95 truncate">{displaySchool}</span>
         </div>
 
-        <div className="relative z-10 flex-1 flex flex-col justify-center py-16 lg:py-0 max-w-md">
+        <div className="relative z-10 flex flex-col justify-center py-8 sm:py-12 lg:py-0 lg:flex-1 max-w-md">
           <h1
-            className={`${instrumentSerif.className} text-4xl sm:text-5xl lg:text-[3.25rem] leading-[1.15] text-white font-normal`}
+            className={`${instrumentSerif.className} text-[1.75rem] leading-[1.2] sm:text-4xl sm:leading-[1.15] lg:text-[3.25rem] text-white font-normal`}
           >
             A quieter way to run the school day.
           </h1>
-          <p className="mt-6 text-sm sm:text-base text-white/55 leading-relaxed max-w-sm">
+          <p className="mt-4 sm:mt-6 text-sm sm:text-base text-white/55 leading-relaxed max-w-sm">
             One system for admissions, attendance, timetables, exams, and fees — built for the people who keep the school running.
           </p>
         </div>
 
-        <div className="relative z-10 flex justify-between text-[11px] text-white/40 tracking-wide">
+        <div className="relative z-10 hidden sm:flex justify-between gap-4 text-[11px] text-white/40 tracking-wide">
           <span>SMS · v1.0</span>
-          <span>Single-school · Open source</span>
+          <span className="text-right">Single-school · Open source</span>
         </div>
       </div>
 
       {/* Right — sign in */}
-      <div className="flex-1 flex flex-col justify-center bg-[#f7f5f0] px-6 py-12 sm:px-12 lg:px-16 lg:py-16 lg:min-h-screen">
-        <div className="w-full max-w-md mx-auto">
-          <p className="text-[11px] font-semibold tracking-[0.2em] text-neutral-400 uppercase mb-3">Sign in</p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-neutral-900 tracking-tight">Welcome back.</h2>
-          <p className="mt-3 text-sm text-neutral-500 leading-relaxed">{ROLE_HINTS[role]}</p>
+      <div className="flex-1 flex flex-col justify-center bg-[#f7f5f0] px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-12 lg:px-16 lg:py-16 lg:min-h-screen min-w-0">
+        <div className="w-full max-w-md mx-auto min-w-0">
+          <p className="text-[11px] font-semibold tracking-[0.2em] text-neutral-400 uppercase mb-2 sm:mb-3">
+            Sign in
+          </p>
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-neutral-900 tracking-tight">
+            Welcome back.
+          </h2>
+          <p className="mt-2 sm:mt-3 text-sm text-neutral-500 leading-relaxed">{ROLE_HINTS[role]}</p>
 
-          {/* Role pills */}
-          <div className="mt-8 flex flex-wrap gap-2">
+          {/* Role pills — horizontal scroll on narrow screens */}
+          <div className="mt-6 sm:mt-8 -mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex flex-nowrap sm:flex-wrap gap-2 min-w-min sm:min-w-0 pb-0.5 sm:pb-0">
             {ROLE_TABS.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setRole(tab.id)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors border ${
+                className={`shrink-0 px-3.5 sm:px-4 py-2 rounded-full text-sm font-medium transition-colors border ${
                   role === tab.id
                     ? "bg-neutral-900 text-white border-neutral-900"
                     : "bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300"
@@ -148,14 +157,15 @@ export default function LoginPage() {
                 {tab.label}
               </button>
             ))}
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+          <form onSubmit={handleSubmit} className="mt-6 sm:mt-8 space-y-4 sm:space-y-5">
             <div>
               <label htmlFor="email" className="block text-xs font-medium text-neutral-500 mb-1.5">
                 Email
               </label>
-              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
+              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-3.5 sm:px-4 py-3 min-h-[48px] focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
                 <MailIcon />
                 <input
                   id="email"
@@ -165,7 +175,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@school.edu"
-                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
+                  className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
                 />
               </div>
             </div>
@@ -179,7 +189,7 @@ export default function LoginPage() {
                   Forgot?
                 </span>
               </div>
-              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
+              <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-3.5 sm:px-4 py-3 min-h-[48px] focus-within:ring-2 focus-within:ring-neutral-900/10 focus-within:border-neutral-400 transition-shadow">
                 <LockIcon />
                 <input
                   id="password"
@@ -189,37 +199,28 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
+                  className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-neutral-900 placeholder:text-neutral-400 outline-none"
                 />
               </div>
             </div>
 
-            <label className="flex items-center gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={keepSignedIn}
-                onChange={(e) => setKeepSignedIn(e.target.checked)}
-                className="w-4 h-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
-              />
-              <span className="text-sm text-neutral-600">Keep me signed in on this device</span>
-            </label>
+            <Checkbox
+              checked={keepSignedIn}
+              onChange={setKeepSignedIn}
+              label="Keep me signed in on this device"
+            />
 
             {error && (
               <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 rounded-xl bg-neutral-900 text-white text-sm font-semibold hover:bg-neutral-800 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-              {!loading && <span aria-hidden>→</span>}
-            </button>
+            <IosArrowButton loading={loading} loadingLabel="Signing in…">
+              Sign in
+            </IosArrowButton>
           </form>
 
           {setupStatus && !setupStatus.configured ? (
-            <div className="mt-8 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4">
+            <div className="mt-6 sm:mt-8 rounded-xl border border-neutral-200 bg-white/80 px-4 py-4">
               <p className="text-sm font-medium text-neutral-800">First-time setup</p>
               <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
                 No school has been configured yet. Create your institution and the first administrator account.
@@ -232,14 +233,14 @@ export default function LoginPage() {
               </Link>
             </div>
           ) : (
-            <div className="mt-8 rounded-xl border border-neutral-200 bg-white/60 px-4 py-4">
+            <div className="mt-6 sm:mt-8 rounded-xl border border-neutral-200 bg-white/60 px-4 py-4">
               <p className="text-sm text-neutral-600 leading-relaxed">
                 <span className="font-medium text-neutral-800">Secure sign-in.</span> Your session uses encrypted tokens. Staff manage roles and permissions under Settings → Roles.
               </p>
             </div>
           )}
 
-          <div className="mt-10 flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-400">
+          <div className="mt-8 sm:mt-10 flex flex-wrap justify-center sm:justify-start gap-x-3 gap-y-2 text-xs text-neutral-400">
             <span>EN</span>
             <span className="text-neutral-300">·</span>
             <Link href="/dashboard" className="hover:text-neutral-600">
