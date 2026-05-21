@@ -52,9 +52,41 @@ class FeeComponent(Base):
     item_id = Column(String, nullable=True)
     discount = Column(Float, default=0)
     total = Column(Float, nullable=True)
+    frequency = Column(String(32), nullable=True)
+    due_day = Column(String(32), nullable=True)
     idx = Column(Integer, default=0)
 
     fee_structure = relationship("FeeStructure", back_populates="components")
+
+
+class PaymentMethod(Base):
+    __tablename__ = "payment_methods"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    method_type = Column(String(32), nullable=False, default="cash")  # cash, upi, card, bank
+    provider = Column(String(120), nullable=True)
+    fee_note = Column(String(255), nullable=True)
+    is_enabled = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class FeeDiscountRule(Base):
+    __tablename__ = "fee_discount_rules"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    discount_percent = Column(Float, nullable=False, default=0)
+    criteria_type = Column(String(40), nullable=False, default="custom")
+    criteria_label = Column(String(120), nullable=True)
+    auto_apply = Column(Boolean, default=True)
+    is_enabled = Column(Boolean, default=True)
+    student_count = Column(Integer, default=0)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class FeeSchedule(Base):
