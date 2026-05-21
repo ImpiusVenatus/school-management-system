@@ -10,8 +10,10 @@ class Role(Base):
 
     id = Column(String, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
     is_system = Column(Boolean, default=False)
+    scoped_to_assigned_sections = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
