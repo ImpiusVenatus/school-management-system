@@ -27,7 +27,7 @@ from app.schemas.settings import (
 )
 
 from app.core.auth import get_current_user
-
+from app.core.currencies import currency_choices, normalize_currency_code
 from app.core.permissions import user_has_permission
 
 
@@ -101,7 +101,7 @@ def _to_response(row: EducationSettings) -> SettingsResponse:
 
         current_academic_term_id=row.current_academic_term_id,
 
-        academic_year_start_month=row.academic_year_start_month or 4,
+        academic_year_start_month=row.academic_year_start_month or 1,
 
         school_code=row.school_code,
 
@@ -122,7 +122,7 @@ def _to_response(row: EducationSettings) -> SettingsResponse:
         website=row.website,
 
         brand_color=row.brand_color,
-
+        currency_code=normalize_currency_code(getattr(row, "currency_code", None)),
     )
 
 
@@ -142,7 +142,9 @@ def get_settings(
     return _to_response(_get_or_create_settings(db))
 
 
-
+@router.get("/currencies")
+def list_currencies(current_user: User = Depends(get_current_user)):
+    return currency_choices()
 
 
 def _program_data_counts(db: Session) -> dict[str, int]:
@@ -366,6 +368,9 @@ def update_settings(
         if value is not None:
 
             setattr(row, field, value.strip() if isinstance(value, str) else value)
+
+    if body.currency_code is not None:
+        row.currency_code = normalize_currency_code(body.currency_code)
 
     db.commit()
 

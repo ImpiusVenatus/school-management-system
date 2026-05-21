@@ -18,7 +18,7 @@ class EducationSettings(Base):
     school_college_name_abbreviation = Column(String, nullable=True)
     school_college_logo = Column(String, nullable=True)
     school_type = Column(String, default="program")  # program | k12
-    academic_year_start_month = Column(Integer, default=4)  # 1=Jan, 4=Apr, 6=Jun, 9=Sep
+    academic_year_start_month = Column(Integer, default=1)  # 1=Jan, 4=Apr, 6=Jun, 9=Sep
     school_code = Column(String(20), nullable=True)
     tagline = Column(String(255), nullable=True)
     affiliation_board = Column(String(80), nullable=True)
@@ -29,6 +29,7 @@ class EducationSettings(Base):
     email = Column(String(120), nullable=True)
     website = Column(String(255), nullable=True)
     brand_color = Column(String(20), nullable=True)
+    currency_code = Column(String(3), nullable=False, default="BDT")
     notification_config = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

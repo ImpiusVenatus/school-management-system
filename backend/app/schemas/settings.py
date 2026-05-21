@@ -20,7 +20,7 @@ class SettingsResponse(BaseModel):
 
     current_academic_term_id: str | None = None
 
-    academic_year_start_month: int = 4
+    academic_year_start_month: int = 1
 
     school_code: str | None = None
 
@@ -41,6 +41,7 @@ class SettingsResponse(BaseModel):
     website: str | None = None
 
     brand_color: str | None = None
+    currency_code: str = "BDT"
 
 
 
@@ -77,6 +78,7 @@ class SettingsUpdate(BaseModel):
     website: str | None = None
 
     brand_color: str | None = Field(default=None, max_length=20)
+    currency_code: str | None = Field(default=None, min_length=3, max_length=3)
 
 
 
