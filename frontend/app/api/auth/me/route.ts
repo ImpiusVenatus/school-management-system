@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { BACKEND_URL, applySessionCookies, resolveAccessToken } from "@/lib/server-auth";
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get("sms_access")?.value;
-  if (!token) {
+  const session = await resolveAccessToken(req);
+  if (!session) {
     return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }
-  const res = await fetch(`${BACKEND}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${session.accessToken}` },
   });
   const data = await res.json().catch(() => ({}));
-  return NextResponse.json(data, { status: res.status });
+  const response = NextResponse.json(data, { status: res.status });
+  if (session.refreshed) applySessionCookies(response, session.refreshed);
+  return response;
 }

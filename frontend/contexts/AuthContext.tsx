@@ -79,25 +79,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
+      let res = await fetch("/api/auth/me", { credentials: "include" });
+      if (!res.ok) {
+        const refreshed = await fetch("/api/auth/refresh", {
+          method: "POST",
+          credentials: "include",
+        }).catch(() => null);
+        if (refreshed?.ok) {
+          res = await fetch("/api/auth/me", { credentials: "include" });
+        }
+      }
       if (res.ok) {
         setUser(await res.json());
+        setTokenState(null);
+        if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
         return true;
       }
     } catch {
       /* ignore */
     }
-    const t = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    if (t) {
-      try {
-        const u = await api<User>("/api/auth/me", { token: t });
-        setUser(u);
-        setTokenState(t);
-        return true;
-      } catch {
-        localStorage.removeItem(TOKEN_KEY);
-        setTokenState(null);
-      }
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(TOKEN_KEY);
+      setTokenState(null);
     }
     return false;
   }, []);

@@ -35,7 +35,9 @@ export async function api<T>(
     if (typeof window !== "undefined") {
       const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" }).catch(() => null);
       if (refreshed?.ok) {
-        const retry = await fetch(url, { ...init, headers, credentials: "include" });
+        const retryHeaders = { ...(headers as Record<string, string>) };
+        delete retryHeaders.Authorization;
+        const retry = await fetch(url, { ...init, headers: retryHeaders, credentials: "include" });
         if (retry.ok) {
           if (retry.status === 204 || retry.headers.get("content-length") === "0") return undefined as T;
           return retry.json();
@@ -67,6 +69,12 @@ export async function apiFormData<T>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(url, { method: "POST", body: formData, headers, credentials: credentials ?? "include" });
   if (res.status === 401 && typeof window !== "undefined") {
+    const refreshed = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" }).catch(() => null);
+    if (refreshed?.ok) {
+      const retryHeaders: Record<string, string> = {};
+      const retry = await fetch(url, { method: "POST", body: formData, headers: retryHeaders, credentials: "include" });
+      if (retry.ok) return retry.json();
+    }
     window.location.href = "/login";
     throw new Error("Unauthorized");
   }
