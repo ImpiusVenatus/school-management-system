@@ -1,17 +1,17 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { SchoolSettingsProvider, useSchoolSettings } from "@/contexts/SchoolSettingsContext";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { useRouter, usePathname } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
-import { getApiUrl } from "@/lib/api";
+import { Suspense, useEffect } from "react";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, token, loading, logout, setupStatus } = useAuth();
+  const { schoolName } = useSchoolSettings();
   const router = useRouter();
   const pathname = usePathname();
-  const [schoolName, setSchoolName] = useState("School");
 
   useEffect(() => {
     if (loading) return;
@@ -25,16 +25,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [loading, user, token, setupStatus, pathname, router]);
 
-  useEffect(() => {
-    const headers: HeadersInit = token ? { Authorization: "Bearer " + token } : {};
-    fetch(token ? getApiUrl("/api/settings") : "/api/proxy/settings", { headers, credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { school_name?: string } | null) => d?.school_name && setSchoolName(d.school_name))
-      .catch(() => {});
-  }, [token, user]);
-
   if (loading) {
-    return <div className="min-h-screen bg-[var(--background)] flex items-center justify-center"><p className="text-gray-500">Loading...</p></div>;
+    return (
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    );
   }
   if (setupStatus && !setupStatus.configured) return null;
   if (!user && !token) return null;
@@ -49,5 +45,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 overflow-auto">{children}</main>
       </div>
     </div>
+  );
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SchoolSettingsProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </SchoolSettingsProvider>
   );
 }

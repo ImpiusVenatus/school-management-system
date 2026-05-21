@@ -6,14 +6,8 @@ import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import type { SchoolProfile } from "@/components/settings/types";
+import { currencySelectOptions, getCurrency } from "@/lib/currency";
 import { btnPrimary, inputClass, labelClass } from "@/lib/ui";
-
-const CYCLE_OPTIONS = [
-  { value: "4", label: "April – March" },
-  { value: "1", label: "January – December" },
-  { value: "6", label: "June – May" },
-  { value: "9", label: "September – August" },
-];
 
 const BOARD_OPTIONS = [
   { value: "", label: "— Select board —" },
@@ -49,8 +43,6 @@ export function SchoolProfileTab({
   schoolType,
   setSchoolType,
   savedSchoolType,
-  startMonth,
-  setStartMonth,
   saving,
   impactLoading,
   onSave,
@@ -66,8 +58,6 @@ export function SchoolProfileTab({
   schoolType: "program" | "k12";
   setSchoolType: (v: "program" | "k12") => void;
   savedSchoolType: "program" | "k12";
-  startMonth: number;
-  setStartMonth: (v: number) => void;
   saving: boolean;
   impactLoading: boolean;
   onSave: (e: React.FormEvent) => void;
@@ -237,16 +227,41 @@ export function SchoolProfileTab({
         </Card>
 
         <Card>
-          <h3 className="text-sm font-semibold text-[var(--foreground)] mb-4">Regional & format</h3>
+          <h3 className="text-sm font-semibold text-[var(--foreground)] mb-4">Currency</h3>
+          <p className="text-sm text-[var(--muted)] mb-4 max-w-2xl">
+            Used for fees, invoices, and all money amounts across the app. Default is Bangladeshi Taka (BDT).
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl">
+            <div>
+              <SelectField
+                label="School currency"
+                options={currencySelectOptions()}
+                value={profile.currency_code || "BDT"}
+                onChange={(v) => onChange("currency_code", v)}
+              />
+            </div>
+            <div className="flex items-end pb-1">
+              <p className="text-sm text-[var(--muted)]">
+                Preview:{" "}
+                <span className="font-semibold text-[var(--foreground)] tabular-nums">
+                  {getCurrency(profile.currency_code).symbol}
+                  {getCurrency(profile.currency_code).code}
+                </span>{" "}
+                — example {getCurrency(profile.currency_code).symbol}12,500
+              </p>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-[var(--foreground)] mb-1">School mode</h3>
+          <p className="text-sm text-[var(--muted)] mb-4">
+            Program vs K-12 changes how classes and enrollments are organized. Academic year calendar is configured under{" "}
+            <strong>Academic years</strong>.
+          </p>
+          <div className="max-w-md">
             <SelectField
-              label="Academic year cycle"
-              options={CYCLE_OPTIONS}
-              value={String(startMonth)}
-              onChange={(v) => setStartMonth(parseInt(v, 10) || 4)}
-            />
-            <SelectField
-              label="School type"
+              label="Structure type"
               options={[
                 { value: "program", label: "Program-based (groups & programs)" },
                 { value: "k12", label: "K-12 (classes & sections)" },
@@ -260,9 +275,6 @@ export function SchoolProfileTab({
               Changing school type affects navigation only; existing data is kept.
             </p>
           )}
-          <button type="submit" disabled={saving || impactLoading} className={`${btnPrimary} mt-4 hidden`}>
-            Save
-          </button>
         </Card>
       </form>
 

@@ -21,8 +21,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${plusJakartaSans.variable} ${plusJakartaSans.className} font-sans antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        suppressHydrationWarning
+        className={`${plusJakartaSans.variable} ${plusJakartaSans.className} font-sans antialiased`}
+      >
         <AuthProvider>
           <SnackbarProvider>{children}</SnackbarProvider>
         </AuthProvider>
