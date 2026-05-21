@@ -1,17 +1,47 @@
 """School Management System - FastAPI backend (reference: Frappe Education)."""
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app.config import get_settings
-from app.database import engine, Base
-from app.api import auth, students, programs, courses, enrollment, academic
+from app.database import engine, Base, SessionLocal
+from app.api.rbac import _ensure_rbac_initialized
+from app.api import auth, students, programs, courses, enrollment, academic, academic_departments
 from app.api import student_groups, course_schedule, attendance, leave, fees, assessment
 from app.api import instructors, rooms, guardians, applicants, files, setup, clubs, notices
 from app.api import settings as settings_api
 from app.api import k12, invoices, rbac
 
 config = get_settings()
-app = FastAPI(title=config.APP_NAME, version="1.0.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = SessionLocal()
+    try:
+        _ensure_rbac_initialized(db)
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title=config.APP_NAME, version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(DBAPIError)
+async def database_connection_handler(_request: Request, exc: Exception):
+    """Return 503 when Neon/Postgres drops an idle SSL connection so the client can retry."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database connection was interrupted. Please retry your request.",
+        },
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +59,7 @@ app.include_router(programs.router, prefix=api_prefix)
 app.include_router(courses.router, prefix=api_prefix)
 app.include_router(enrollment.router, prefix=api_prefix)
 app.include_router(academic.router, prefix=api_prefix)
+app.include_router(academic_departments.router, prefix=f"{api_prefix}/academic")
 app.include_router(student_groups.router, prefix=api_prefix)
 app.include_router(course_schedule.router, prefix=api_prefix)
 app.include_router(attendance.router, prefix=api_prefix)

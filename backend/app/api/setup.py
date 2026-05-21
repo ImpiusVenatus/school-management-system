@@ -45,6 +45,7 @@ def setup(body: SetupRequest, db: Session = Depends(get_db)):
     settings.school_college_name_abbreviation = body.school_name
     settings.school_college_logo = body.school_logo or None
     settings.school_type = body.school_type if body.school_type in ("program", "k12") else "program"
+    settings.currency_code = "BDT"
     # Create first admin user
     user = User(
         id=str(uuid.uuid4()),
