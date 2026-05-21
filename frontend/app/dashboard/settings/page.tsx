@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
@@ -9,13 +9,15 @@ import { SettingsShell } from "@/components/settings/SettingsShell";
 import { SchoolProfileTab } from "@/components/settings/SchoolProfileTab";
 import { AcademicYearsTab, type AcademicYearRow } from "@/components/settings/AcademicYearsTab";
 import { ClassesSectionsTab } from "@/components/settings/ClassesSectionsTab";
+import { DepartmentsTab } from "@/components/settings/DepartmentsTab";
 import { SubjectsTab } from "@/components/settings/SubjectsTab";
 import { GradeScalesTab } from "@/components/settings/GradeScalesTab";
 import { FeeCategoriesTab } from "@/components/settings/FeeCategoriesTab";
 import { NotificationsTab } from "@/components/settings/NotificationsTab";
 import { RolesSettingsTab } from "@/components/settings/RolesSettingsTab";
-import { SettingsPlaceholder } from "@/components/settings/SettingsPlaceholder";
-import { tabFromParam, PLACEHOLDER_TABS, VALID_TABS, type SettingsTab } from "@/components/settings/settings-nav";
+import { IntegrationsTab } from "@/components/settings/IntegrationsTab";
+import { AuditLogTab } from "@/components/settings/AuditLogTab";
+import { tabFromParam, VALID_TABS, type SettingsTab } from "@/components/settings/settings-nav";
 import type { SchoolProfile } from "@/components/settings/types";
 import { Card } from "@/components/ui/Card";
 
@@ -31,7 +33,7 @@ const EMPTY_PROFILE: SchoolProfile = {
   school_name: "",
   school_logo: "",
   school_type: "program",
-  academic_year_start_month: 4,
+  academic_year_start_month: 1,
   school_code: "",
   tagline: "",
   affiliation_board: "",
@@ -42,6 +44,7 @@ const EMPTY_PROFILE: SchoolProfile = {
   email: "",
   website: "",
   brand_color: "#14140F",
+  currency_code: "BDT",
 };
 
 function SettingsPageInner() {
@@ -54,7 +57,7 @@ function SettingsPageInner() {
   const [profile, setProfile] = useState<SchoolProfile>(EMPTY_PROFILE);
   const [savedSchoolType, setSavedSchoolType] = useState<"program" | "k12">("program");
   const [schoolType, setSchoolType] = useState<"program" | "k12">("program");
-  const [startMonth, setStartMonth] = useState(4);
+  const [startMonth, setStartMonth] = useState(1);
   const [activeYearId, setActiveYearId] = useState<string | null>(null);
   const [years, setYears] = useState<AcademicYearRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +76,7 @@ function SettingsPageInner() {
       const t = d.school_type === "k12" ? "k12" : "program";
       setSchoolType(t);
       setSavedSchoolType(t);
-      setStartMonth(d.academic_year_start_month ?? 4);
+      setStartMonth(d.academic_year_start_month ?? 1);
       setActiveYearId(d.current_academic_year_id ?? null);
     } catch {
       snackbar.error("Failed to load settings");
@@ -82,7 +85,9 @@ function SettingsPageInner() {
 
   const loadYears = useCallback(async () => {
     try {
-      const rows = await api<AcademicYearRow[]>("/api/academic/years", { token: token ?? undefined });
+      const rows = await api<AcademicYearRow[]>("/api/academic/years?include_counts=false", {
+        token: token ?? undefined,
+      });
       setYears(rows);
       const active = rows.find((y) => y.is_active);
       if (active) setActiveYearId(active.id);
@@ -91,12 +96,30 @@ function SettingsPageInner() {
     }
   }, [token]);
 
+  const yearOptions = useMemo(
+    () =>
+      years.map((y) => ({
+        id: y.id,
+        academic_year_name: y.academic_year_name,
+        is_active: y.is_active,
+      })),
+    [years]
+  );
+
   useEffect(() => {
     if (authLoading) return;
     if (!user && !token) return;
+    let cancelled = false;
     setLoading(true);
-    Promise.all([loadSettings(), loadYears()]).finally(() => setLoading(false));
-  }, [authLoading, user, token, loadSettings, loadYears]);
+    Promise.all([loadSettings(), loadYears()]).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally only re-fetch on auth/session change — not when snackbar or callbacks change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, token]);
 
   useEffect(() => {
     setActiveTab(tabFromParam(searchParams.get("tab")));
@@ -113,6 +136,12 @@ function SettingsPageInner() {
     setProfile((p) => ({ ...p, [field]: value }));
   }
 
+  /** Refresh year list only (no sidebar / full settings refetch). */
+  function onYearsListChange() {
+    loadYears();
+  }
+
+  /** Active year or school-wide settings changed — update sidebar label too. */
   function onActiveYearChange() {
     loadSettings();
     loadYears();
@@ -129,7 +158,6 @@ function SettingsPageInner() {
           school_name: profile.school_name?.trim() || undefined,
           school_logo: profile.school_logo?.trim() || undefined,
           school_type: typeToSave,
-          academic_year_start_month: startMonth,
           school_code: profile.school_code?.trim() || undefined,
           tagline: profile.tagline?.trim() || undefined,
           affiliation_board: profile.affiliation_board || undefined,
@@ -140,6 +168,7 @@ function SettingsPageInner() {
           email: profile.email?.trim() || undefined,
           website: profile.website?.trim() || undefined,
           brand_color: profile.brand_color?.trim() || undefined,
+          currency_code: profile.currency_code || "BDT",
         }),
       });
       setSavedSchoolType(typeToSave);
@@ -208,8 +237,6 @@ function SettingsPageInner() {
           schoolType={schoolType}
           setSchoolType={setSchoolType}
           savedSchoolType={savedSchoolType}
-          startMonth={startMonth}
-          setStartMonth={setStartMonth}
           saving={saving}
           impactLoading={impactLoading}
           onSave={handleProfileSubmit}
@@ -227,22 +254,32 @@ function SettingsPageInner() {
         />
       )}
       {activeTab === "years" && (
-        <AcademicYearsTab token={token} startMonth={startMonth} onActiveYearChange={onActiveYearChange} />
+        <AcademicYearsTab
+          token={token}
+          startMonth={startMonth}
+          onStartMonthChange={setStartMonth}
+          onYearsListChange={onYearsListChange}
+          onActiveYearChange={onActiveYearChange}
+        />
       )}
       {activeTab === "classes" && (
         <ClassesSectionsTab
           token={token}
           schoolType={schoolType}
           activeYearId={activeYearId}
-          years={years.map((y) => ({ id: y.id, academic_year_name: y.academic_year_name, is_active: y.is_active }))}
+          years={yearOptions}
         />
       )}
+      {activeTab === "departments" && <DepartmentsTab token={token} />}
       {activeTab === "subjects" && <SubjectsTab token={token} schoolType={schoolType} />}
       {activeTab === "grade-scales" && <GradeScalesTab token={token} />}
       {activeTab === "roles" && <RolesSettingsTab token={token} />}
-      {activeTab === "fee-categories" && <FeeCategoriesTab token={token} />}
+      {activeTab === "fee-categories" && (
+        <FeeCategoriesTab token={token} years={yearOptions} activeYearId={activeYearId} />
+      )}
       {activeTab === "notifications" && <NotificationsTab token={token} />}
-      {PLACEHOLDER_TABS.includes(activeTab) && <SettingsPlaceholder tab={activeTab} />}
+      {activeTab === "integrations" && <IntegrationsTab />}
+      {activeTab === "audit-log" && <AuditLogTab />}
     </SettingsShell>
   );
 }

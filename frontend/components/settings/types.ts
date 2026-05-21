@@ -14,4 +14,5 @@ export type SchoolProfile = {
   email?: string | null;
   website?: string | null;
   brand_color?: string | null;
+  currency_code?: string;
 };

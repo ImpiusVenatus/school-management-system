@@ -9,6 +9,7 @@ import { useSnackbar } from "@/contexts/SnackbarContext";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import { btnPrimary, btnSecondary, inputClass } from "@/lib/ui";
+import { ClassSetupPanel } from "@/components/settings/ClassSetupPanel";
 
 type YearOption = { id: string; academic_year_name: string; is_active: boolean };
 
@@ -44,6 +45,19 @@ function classSummary(c: K12ClassCard): string {
   return `${c.section_count} section${c.section_count === 1 ? "" : "s"} · ${c.total_students}/${cap} students`;
 }
 
+function IconEdit({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75} aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125L16.862 4.487" />
+    </svg>
+  );
+}
+
 function mergeClassCard(c: K12ClassCard, patch: Partial<K12ClassCard>): K12ClassCard {
   const sections = patch.sections ?? c.sections;
   const total_capacity = sections.length ? sections.reduce((s, x) => s + x.capacity, 0) : null;
@@ -74,6 +88,7 @@ export function ClassesSectionsTab({
   const [k12Classes, setK12Classes] = useState<K12ClassCard[]>([]);
   const [programGroups, setProgramGroups] = useState<ProgramGroup[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
   const [classModal, setClassModal] = useState(false);
   const [sectionModal, setSectionModal] = useState<string | null>(null);
   const [editSection, setEditSection] = useState<{ classId: string; section: K12Section } | null>(null);
@@ -81,17 +96,19 @@ export function ClassesSectionsTab({
   const [className, setClassName] = useState("");
   const [addFirstSection, setAddFirstSection] = useState(true);
   const [sectionName, setSectionName] = useState("A");
-  const [sectionCapacity, setSectionCapacity] = useState("40");
-  const [maxStrength, setMaxStrength] = useState("40");
+  const [sectionCapacity, setSectionCapacity] = useState("60");
+  const [maxStrength, setMaxStrength] = useState("60");
   const [saving, setSaving] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const viewYearIdRef = useRef(viewYearId);
   viewYearIdRef.current = viewYearId;
+  const firstYearId = years[0]?.id ?? "";
 
   useEffect(() => {
-    const id = activeYearId || years[0]?.id || "";
-    setViewYearId(id);
-  }, [activeYearId, years]);
+    const id = activeYearId || firstYearId;
+    if (!id) return;
+    setViewYearId((prev) => (prev === id ? prev : id));
+  }, [activeYearId, firstYearId]);
 
   const fetchStructure = useCallback(async (): Promise<K12ClassCard[] | ProgramGroup[] | null> => {
     const yearId = viewYearIdRef.current;
@@ -107,19 +124,8 @@ export function ClassesSectionsTab({
     );
   }, [schoolType, token]);
 
-  const load = useCallback(async () => {
-    if (!viewYearId) {
-      setK12Classes([]);
-      setProgramGroups([]);
-      setInitialLoading(false);
-      return;
-    }
-    setInitialLoading(true);
-    setK12Classes([]);
-    setProgramGroups([]);
-    try {
-      const data = await fetchStructure();
-      if (data === null) return;
+  const applyStructure = useCallback(
+    (data: K12ClassCard[] | ProgramGroup[]) => {
       if (schoolType === "k12") {
         const list = data as K12ClassCard[];
         setK12Classes(list);
@@ -131,16 +137,54 @@ export function ClassesSectionsTab({
         setProgramGroups(data as ProgramGroup[]);
         setSelectedClassId(null);
       }
-    } catch {
-      snackbar.error("Could not load classes");
-    } finally {
-      setInitialLoading(false);
-    }
-  }, [viewYearId, fetchStructure, schoolType, snackbar]);
+    },
+    [schoolType]
+  );
 
+  const snackbarRef = useRef(snackbar);
+  snackbarRef.current = snackbar;
+
+  const load = useCallback(
+    async (opts?: { reset?: boolean }) => {
+      const yearId = viewYearIdRef.current;
+      if (!yearId) {
+        setK12Classes([]);
+        setProgramGroups([]);
+        setInitialLoading(false);
+        hasLoadedRef.current = false;
+        return;
+      }
+      const showFullSpinner = opts?.reset || !hasLoadedRef.current;
+      if (showFullSpinner) {
+        setInitialLoading(true);
+        if (opts?.reset) {
+          setK12Classes([]);
+          setProgramGroups([]);
+        }
+      }
+      try {
+        const data = await fetchStructure();
+        if (data === null) return;
+        applyStructure(data);
+        hasLoadedRef.current = true;
+      } catch {
+        snackbarRef.current.error("Could not load classes");
+      } finally {
+        setInitialLoading(false);
+      }
+    },
+    [fetchStructure, applyStructure]
+  );
+
+  const prevFetchKeyRef = useRef("");
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!viewYearId) return;
+    const key = `${viewYearId}:${schoolType}`;
+    if (prevFetchKeyRef.current === key) return;
+    prevFetchKeyRef.current = key;
+    hasLoadedRef.current = false;
+    load({ reset: true });
+  }, [viewYearId, schoolType, load]);
 
   const viewYear = years.find((y) => y.id === viewYearId);
   const isViewingActive = viewYearId === activeYearId;
@@ -149,15 +193,15 @@ export function ClassesSectionsTab({
     setClassName("");
     setAddFirstSection(true);
     setSectionName("A");
-    setSectionCapacity("40");
-    setMaxStrength("40");
+    setSectionCapacity("60");
+    setMaxStrength("60");
     setClassModal(true);
   }
 
   function openSectionModal(classId: string) {
     setSectionModal(classId);
     setSectionName("");
-    setSectionCapacity("40");
+    setSectionCapacity("60");
   }
 
   function parseCapacity(raw: string): number | null {
@@ -357,7 +401,8 @@ export function ClassesSectionsTab({
     );
   }
 
-  const gridLoading = initialLoading && (schoolType === "k12" ? k12Classes.length === 0 : programGroups.length === 0);
+  const gridLoading =
+    initialLoading && (schoolType === "k12" ? k12Classes.length === 0 : programGroups.length === 0);
   const selectedClass = k12Classes.find((c) => c.id === selectedClassId) ?? null;
   const totalStudents = k12Classes.reduce((s, c) => s + c.total_students, 0);
   const meta = TAB_META.classes;
@@ -415,7 +460,7 @@ export function ClassesSectionsTab({
                       <button
                         type="button"
                         onClick={() => setSelectedClassId(c.id)}
-                        className={`w-full text-left px-4 py-3 transition-colors ${
+                        className={`w-full text-left px-4 py-3 transition-colors cursor-pointer ${
                           selected ? "bg-[var(--primary-light)]" : "hover:bg-neutral-50"
                         }`}
                       >
@@ -464,11 +509,16 @@ export function ClassesSectionsTab({
                           key={s.id}
                           type="button"
                           onClick={() => openEditSection(selectedClass.id, s)}
-                          className="rounded-xl border border-[var(--border)] p-4 bg-white text-left hover:border-[var(--border-strong)] transition-colors w-full"
+                          className="rounded-xl border border-[var(--border)] p-4 bg-white text-left hover:border-[var(--border-strong)] transition-colors w-full cursor-pointer"
                         >
-                          <div className="flex justify-between items-start">
-                            <p className="font-semibold text-base">Section {s.name}</p>
-                            <span className="text-[11px] text-[var(--muted)]">Edit max</span>
+                          <div className="flex justify-between items-start gap-2">
+                            <p className="font-semibold text-base">{s.name}</p>
+                            <span
+                              className="shrink-0 p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-neutral-100"
+                              aria-label="Edit section"
+                            >
+                              <IconEdit />
+                            </span>
                           </div>
                           <p className="text-2xl font-bold mt-2">
                             {s.student_count}
@@ -487,11 +537,24 @@ export function ClassesSectionsTab({
                       ))}
                     </div>
                   )}
-                  <div className="mt-4 rounded-xl border border-dashed border-[var(--border)] px-4 py-3">
-                    <p className="text-sm text-[var(--muted)]">
-                      Subject assignment, timetable, and class settings — coming in the next design pass.
-                    </p>
-                  </div>
+                  <ClassSetupPanel
+                    token={token}
+                    classId={selectedClass.id}
+                    className={selectedClass.name}
+                    onClassUpdated={(patch) => {
+                      setK12Classes((prev) =>
+                        prev.map((c) =>
+                          c.id !== selectedClass.id
+                            ? c
+                            : {
+                                ...c,
+                                name: patch.name ?? c.name,
+                                numeric_level: patch.numeric_level !== undefined ? patch.numeric_level : c.numeric_level,
+                              }
+                        )
+                      );
+                    }}
+                  />
                 </Card>
               ) : (
                 <Card>
@@ -515,7 +578,7 @@ export function ClassesSectionsTab({
                   setEditProgramGroup(g);
                   setMaxStrength(String(g.max_strength ?? 40));
                 }}
-                className="rounded-xl border border-[var(--border)] bg-white p-4 text-left hover:border-[var(--border-strong)] w-full"
+                className="rounded-xl border border-[var(--border)] bg-white p-4 text-left hover:border-[var(--border-strong)] w-full cursor-pointer"
               >
                 <p className="font-semibold">{g.student_group_name}</p>
                 <p className="text-xs text-[var(--muted)] mt-1">
@@ -563,6 +626,7 @@ export function ClassesSectionsTab({
                     <input
                       type="text"
                       required={addFirstSection}
+                      maxLength={50}
                       value={sectionName}
                       onChange={(e) => setSectionName(e.target.value)}
                       className={inputClass}
@@ -623,6 +687,7 @@ export function ClassesSectionsTab({
               <input
                 type="text"
                 required
+                maxLength={50}
                 value={sectionName}
                 onChange={(e) => setSectionName(e.target.value)}
                 className={inputClass}
@@ -696,12 +761,14 @@ export function ClassesSectionsTab({
               <input
                 type="text"
                 required
+                maxLength={50}
                 autoFocus
                 value={sectionName}
                 onChange={(e) => setSectionName(e.target.value)}
                 className={inputClass}
-                placeholder="B"
+                placeholder="B or Mountain Lions"
               />
+              <p className="text-[11px] text-[var(--muted)] mt-1">Up to 50 characters</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Max students</label>

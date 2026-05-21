@@ -2,6 +2,7 @@ export type SettingsTab =
   | "profile"
   | "years"
   | "classes"
+  | "departments"
   | "subjects"
   | "grade-scales"
   | "roles"
@@ -10,7 +11,7 @@ export type SettingsTab =
   | "integrations"
   | "audit-log";
 
-export const PLACEHOLDER_TABS: SettingsTab[] = ["integrations", "audit-log"];
+export const PLACEHOLDER_TABS: SettingsTab[] = [];
 
 export type SettingsNavItem = {
   id: SettingsTab;
@@ -35,6 +36,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
     heading: "Academic",
     items: [
       { id: "classes", label: "Classes & sections" },
+      { id: "departments", label: "Departments" },
       { id: "subjects", label: "Subjects" },
       { id: "grade-scales", label: "Grade scales" },
     ],
@@ -51,8 +53,8 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
     heading: "System",
     items: [
       { id: "notifications", label: "Notifications" },
-      { id: "integrations", label: "Integrations", placeholder: true },
-      { id: "audit-log", label: "Audit log", placeholder: true },
+      { id: "integrations", label: "Integrations" },
+      { id: "audit-log", label: "Audit log" },
     ],
   },
 ];
@@ -63,12 +65,12 @@ export const TAB_META: Record<
 > = {
   profile: {
     title: "School profile",
-    subtitle: "Identity, contact, branding, and how the school runs in the system.",
+    subtitle: "Identity, contact, and branding.",
     breadcrumb: "School profile",
   },
   years: {
     title: "Academic years",
-    subtitle: "Classes, enrollments, exams, and fees are scoped to the active year.",
+    subtitle: "Year cycle, active year, and historical years.",
     breadcrumb: "Academic years",
   },
   classes: {
@@ -76,14 +78,19 @@ export const TAB_META: Record<
     subtitle: "Grade levels and sections for the selected academic year.",
     breadcrumb: "Classes & sections",
   },
+  departments: {
+    title: "Departments",
+    subtitle: "Group subjects by department (e.g. Languages, STEM). Nothing is predefined — your school defines these.",
+    breadcrumb: "Departments",
+  },
   subjects: {
     title: "Subjects",
-    subtitle: "Master catalog of subjects. Each class picks from this list.",
+    subtitle: "Teachable subjects in your catalog. Assign them to classes from Classes & sections.",
     breadcrumb: "Subjects",
   },
   "grade-scales": {
     title: "Grade scales",
-    subtitle: "Grading schemes and mark boundaries.",
+    subtitle: "A grade scale maps marks % to a letter grade and GPA. Each class uses one scale, falling back to the default.",
     breadcrumb: "Grade scales",
   },
   roles: {
@@ -103,12 +110,12 @@ export const TAB_META: Record<
   },
   integrations: {
     title: "Integrations",
-    subtitle: "Payment gateways, calendars, and third-party tools.",
+    subtitle: "Connect payments, SMS, email, SSO, and storage.",
     breadcrumb: "Integrations",
   },
   "audit-log": {
     title: "Audit log",
-    subtitle: "Who changed what and when.",
+    subtitle: "Append-only record of state-changing actions.",
     breadcrumb: "Audit log",
   },
 };
@@ -117,6 +124,7 @@ export const VALID_TABS: SettingsTab[] = [
   "profile",
   "years",
   "classes",
+  "departments",
   "subjects",
   "grade-scales",
   "roles",

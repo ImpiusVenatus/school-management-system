@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -15,9 +16,9 @@ type K12Subject = {
   name: string;
   code: string;
   is_optional: boolean;
-  department?: string | null;
+  department_id?: string | null;
+  department_name?: string | null;
   grades_label?: string | null;
-  periods_per_week?: number | null;
 };
 
 type ProgramCourse = {
@@ -26,14 +27,28 @@ type ProgramCourse = {
   department?: string | null;
 };
 
-const DEPT_FILTERS = ["All", "Languages", "STEM", "Humanities", "Activity"] as const;
-
-const DEPT_COLORS: Record<string, string> = {
-  Languages: "bg-sky-50 text-sky-800 border-sky-200",
-  STEM: "bg-slate-100 text-slate-700 border-slate-200",
-  Humanities: "bg-amber-50 text-amber-800 border-amber-200",
-  Activity: "bg-rose-50 text-rose-800 border-rose-200",
+type Department = {
+  id: string;
+  name: string;
+  is_active: boolean;
 };
+
+const BADGE_PALETTE = [
+  "bg-sky-50 text-sky-800 border-sky-200",
+  "bg-slate-100 text-slate-700 border-slate-200",
+  "bg-amber-50 text-amber-800 border-amber-200",
+  "bg-rose-50 text-rose-800 border-rose-200",
+  "bg-emerald-50 text-emerald-800 border-emerald-200",
+  "bg-violet-50 text-violet-800 border-violet-200",
+];
+
+function deptBadgeClass(departmentId: string): string {
+  let h = 0;
+  for (let i = 0; i < departmentId.length; i++) {
+    h = (h + departmentId.charCodeAt(i)) % BADGE_PALETTE.length;
+  }
+  return BADGE_PALETTE[h];
+}
 
 export function SubjectsTab({
   token,
@@ -45,15 +60,17 @@ export function SubjectsTab({
   const snackbar = useSnackbar();
   const [k12Subjects, setK12Subjects] = useState<K12Subject[]>([]);
   const [courses, setCourses] = useState<ProgramCourse[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState<string>("All");
+  const [deptFilter, setDeptFilter] = useState<string>("all");
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState<K12Subject | null>(null);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
-  const [department, setDepartment] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [programDept, setProgramDept] = useState("");
   const [gradesLabel, setGradesLabel] = useState("");
-  const [periods, setPeriods] = useState("");
   const [isOptional, setIsOptional] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -61,8 +78,12 @@ export function SubjectsTab({
     setLoading(true);
     try {
       if (schoolType === "k12") {
-        const rows = await api<K12Subject[]>("/api/k12/subjects", { token: token ?? undefined });
+        const [rows, depts] = await Promise.all([
+          api<K12Subject[]>("/api/k12/subjects", { token: token ?? undefined }),
+          api<Department[]>("/api/academic/departments", { token: token ?? undefined }),
+        ]);
         setK12Subjects(rows);
+        setDepartments(depts);
         setCourses([]);
       } else {
         const rows = await api<ProgramCourse[]>("/api/courses?limit=200", { token: token ?? undefined }).catch(
@@ -70,6 +91,7 @@ export function SubjectsTab({
         );
         setCourses(rows);
         setK12Subjects([]);
+        setDepartments([]);
       }
     } catch {
       snackbar.error("Could not load subjects");
@@ -82,18 +104,51 @@ export function SubjectsTab({
     load();
   }, [load]);
 
+  const activeDepartments = useMemo(
+    () => departments.filter((d) => d.is_active),
+    [departments]
+  );
+
+  const deptFilterChips = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const d of departments) {
+      seen.set(d.id, d.name);
+    }
+    for (const s of k12Subjects) {
+      if (s.department_id && s.department_name && !seen.has(s.department_id)) {
+        seen.set(s.department_id, s.department_name);
+      }
+    }
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [departments, k12Subjects]);
+
+  const deptSelectOptions = useMemo(
+    () => [
+      { value: "", label: "No department" },
+      ...activeDepartments.map((d) => ({ value: d.id, label: d.name })),
+    ],
+    [activeDepartments]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (schoolType === "k12") {
       return k12Subjects.filter((s) => {
-        if (deptFilter !== "All" && (s.department || "") !== deptFilter) return false;
+        if (deptFilter !== "all") {
+          if (deptFilter === "none") return !s.department_id;
+          if (s.department_id !== deptFilter) return false;
+        }
         if (!q) return true;
-        return s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q);
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.code.toLowerCase().includes(q) ||
+          (s.department_name || "").toLowerCase().includes(q)
+        );
       });
     }
     return courses.filter((c) => {
       if (!q) return true;
-        return c.course_name.toLowerCase().includes(q) || (c.department || "").toLowerCase().includes(q);
+      return c.course_name.toLowerCase().includes(q) || (c.department || "").toLowerCase().includes(q);
     });
   }, [k12Subjects, courses, search, deptFilter, schoolType]);
 
@@ -105,48 +160,96 @@ export function SubjectsTab({
     };
   }, [k12Subjects, courses, schoolType]);
 
-  async function createSubject(e: React.FormEvent) {
+  function openCreate() {
+    setEditing(null);
+    setName("");
+    setCode("");
+    setDepartmentId("");
+    setProgramDept("");
+    setGradesLabel("");
+    setIsOptional(false);
+    setModal(true);
+  }
+
+  function openEdit(s: K12Subject) {
+    setEditing(s);
+    setName(s.name);
+    setCode(s.code);
+    setDepartmentId(s.department_id ?? "");
+    setGradesLabel(s.grades_label ?? "");
+    setIsOptional(s.is_optional);
+    setModal(true);
+  }
+
+  function resetForm() {
+    setModal(false);
+    setEditing(null);
+    setName("");
+    setCode("");
+    setDepartmentId("");
+    setProgramDept("");
+    setGradesLabel("");
+    setIsOptional(false);
+  }
+
+  async function saveSubject(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
       if (schoolType === "k12") {
-        const created = await api<K12Subject>("/api/k12/subjects", {
-          token: token ?? undefined,
-          method: "POST",
-          body: JSON.stringify({
-            name: name.trim(),
-            code: code.trim().toUpperCase(),
-            is_optional: isOptional,
-            department: department || undefined,
-            grades_label: gradesLabel || undefined,
-            periods_per_week: periods ? parseInt(periods, 10) : undefined,
-          }),
-        });
-        setK12Subjects((prev) => [...prev, created]);
+        const payload = {
+          name: name.trim(),
+          code: code.trim().toUpperCase(),
+          is_optional: isOptional,
+          department_id: departmentId || null,
+          grades_label: gradesLabel || undefined,
+        };
+        if (editing) {
+          const updated = await api<K12Subject>(`/api/k12/subjects/${editing.id}`, {
+            token: token ?? undefined,
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          });
+          setK12Subjects((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+          snackbar.success("Subject updated.");
+        } else {
+          const created = await api<K12Subject>("/api/k12/subjects", {
+            token: token ?? undefined,
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          setK12Subjects((prev) => [...prev, created]);
+          snackbar.success("Subject added.");
+        }
       } else {
         await api("/api/courses", {
           token: token ?? undefined,
           method: "POST",
           body: JSON.stringify({
             course_name: name.trim(),
-            department: department || undefined,
+            department: programDept || undefined,
             description: code.trim() ? `Code: ${code.trim()}` : undefined,
           }),
         });
         await load();
+        snackbar.success("Subject added.");
       }
-      snackbar.success("Subject added.");
-      setModal(false);
-      setName("");
-      setCode("");
-      setDepartment("");
-      setGradesLabel("");
-      setPeriods("");
-      setIsOptional(false);
+      resetForm();
     } catch (err) {
-      snackbar.error(err instanceof Error ? err.message : "Failed to create");
+      snackbar.error(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteSubject(s: K12Subject) {
+    if (!confirm(`Delete subject "${s.name}"?`)) return;
+    try {
+      await api(`/api/k12/subjects/${s.id}`, { token: token ?? undefined, method: "DELETE" });
+      setK12Subjects((prev) => prev.filter((x) => x.id !== s.id));
+      snackbar.success("Subject deleted.");
+    } catch (err) {
+      snackbar.error(err instanceof Error ? err.message : "Cannot delete subject");
     }
   }
 
@@ -158,7 +261,7 @@ export function SubjectsTab({
         title={meta.title}
         subtitle={meta.subtitle}
         actions={
-          <button type="button" onClick={() => setModal(true)} className={btnPrimary}>
+          <button type="button" onClick={openCreate} className={btnPrimary}>
             + New subject
           </button>
         }
@@ -178,21 +281,46 @@ export function SubjectsTab({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        {schoolType === "k12" &&
-          DEPT_FILTERS.map((d) => (
+        {schoolType === "k12" && (
+          <>
             <button
-              key={d}
               type="button"
-              onClick={() => setDeptFilter(d)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-                deptFilter === d
+              onClick={() => setDeptFilter("all")}
+              className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                deptFilter === "all"
                   ? "bg-[var(--primary)] text-white border-[var(--primary)]"
                   : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"
               }`}
             >
-              {d}
+              All
             </button>
-          ))}
+            {deptFilterChips.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setDeptFilter(id)}
+                className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                  deptFilter === id
+                    ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                    : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setDeptFilter("none")}
+              className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                deptFilter === "none"
+                  ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                  : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"
+              }`}
+            >
+              Unassigned
+            </button>
+          </>
+        )}
         <input
           type="search"
           value={search}
@@ -216,8 +344,8 @@ export function SubjectsTab({
                   <th className="px-4 py-3">Code</th>
                   <th className="px-4 py-3">Department</th>
                   <th className="px-4 py-3">Grades</th>
-                  <th className="px-4 py-3">Periods/wk</th>
                   <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -228,28 +356,22 @@ export function SubjectsTab({
                         <span className="w-8 h-8 rounded-lg bg-[var(--primary-light)] flex items-center justify-center text-[10px] font-bold">
                           {s.code.slice(0, 3)}
                         </span>
-                        <div>
-                          <p className="font-medium">{s.name}</p>
-                          <p className="text-[10px] text-[var(--muted)]">{s.id}</p>
-                        </div>
+                        <p className="font-medium">{s.name}</p>
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
                     <td className="px-4 py-3">
-                      {s.department ? (
+                      {s.department_name && s.department_id ? (
                         <span
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                            DEPT_COLORS[s.department] || "bg-neutral-100 text-neutral-600"
-                          }`}
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${deptBadgeClass(s.department_id)}`}
                         >
-                          {s.department}
+                          {s.department_name}
                         </span>
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-4 py-3 text-[var(--muted)]">{s.grades_label || "—"}</td>
-                    <td className="px-4 py-3">{s.periods_per_week ?? "—"}</td>
                     <td className="px-4 py-3">
                       {s.is_optional ? (
                         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
@@ -258,6 +380,18 @@ export function SubjectsTab({
                       ) : (
                         <span className="text-[10px] text-[var(--muted)]">Core</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button type="button" onClick={() => openEdit(s)} className={btnSecondary}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSubject(s)}
+                        className="cursor-pointer ml-2 text-xs text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -286,47 +420,55 @@ export function SubjectsTab({
         )}
       </Card>
 
-      <Modal open={modal} onClose={() => !saving && setModal(false)} title="New subject" size="md">
-        <form onSubmit={createSubject} className="space-y-4">
+      <Modal
+        open={modal}
+        onClose={() => !saving && resetForm()}
+        title={editing ? "Edit subject" : "New subject"}
+        size="md"
+      >
+        <form onSubmit={saveSubject} className="space-y-4">
           <div>
             <label className={labelClass}>Name</label>
             <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
           </div>
           <div>
             <label className={labelClass}>Code</label>
-            <input type="text" required value={code} onChange={(e) => setCode(e.target.value)} className={inputClass} placeholder="ENG" />
+            <input
+              type="text"
+              required
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className={inputClass}
+              placeholder="ENG"
+            />
           </div>
           {schoolType === "k12" && (
             <>
-              <SelectField
-                label="Department"
-                options={DEPT_FILTERS.filter((d) => d !== "All").map((d) => ({ value: d, label: d }))}
-                value={department}
-                onChange={setDepartment}
-                placeholder="Optional"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Grades</label>
-                  <input
-                    type="text"
-                    value={gradesLabel}
-                    onChange={(e) => setGradesLabel(e.target.value)}
-                    className={inputClass}
-                    placeholder="KG–10"
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Periods / week</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={40}
-                    value={periods}
-                    onChange={(e) => setPeriods(e.target.value)}
-                    className={inputClass}
-                  />
-                </div>
+              {activeDepartments.length === 0 ? (
+                <p className="text-sm text-[var(--muted)]">
+                  No departments yet.{" "}
+                  <Link href="/dashboard/settings?tab=departments" className="text-[var(--primary)] underline">
+                    Create departments
+                  </Link>{" "}
+                  first, or leave unassigned.
+                </p>
+              ) : (
+                <SelectField
+                  label="Department"
+                  options={deptSelectOptions}
+                  value={departmentId}
+                  onChange={setDepartmentId}
+                />
+              )}
+              <div>
+                <label className={labelClass}>Grades (optional)</label>
+                <input
+                  type="text"
+                  value={gradesLabel}
+                  onChange={(e) => setGradesLabel(e.target.value)}
+                  className={inputClass}
+                  placeholder="KG–10"
+                />
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={isOptional} onChange={(e) => setIsOptional(e.target.checked)} />
@@ -334,12 +476,24 @@ export function SubjectsTab({
               </label>
             </>
           )}
+          {schoolType !== "k12" && (
+            <div>
+              <label className={labelClass}>Department (free text)</label>
+              <input
+                type="text"
+                value={programDept}
+                onChange={(e) => setProgramDept(e.target.value)}
+                className={inputClass}
+                placeholder="Optional"
+              />
+            </div>
+          )}
           <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setModal(false)} className={btnSecondary} disabled={saving}>
+            <button type="button" onClick={() => resetForm()} className={btnSecondary} disabled={saving}>
               Cancel
             </button>
             <button type="submit" disabled={saving} className={btnPrimary}>
-              {saving ? "Creating…" : "Create"}
+              {saving ? "Saving…" : editing ? "Save" : "Create"}
             </button>
           </div>
         </form>
