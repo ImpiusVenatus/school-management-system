@@ -9,6 +9,7 @@ from app.models import (
     AssessmentPlanCriteria,
     AssessmentResult,
     AssessmentResultDetail,
+    K12Class,
 )
 from app.schemas.assessment import (
     GradingScaleCreate,
@@ -19,10 +20,22 @@ from app.schemas.assessment import (
     AssessmentResultCreate,
     AssessmentResultResponse,
     GradingScaleIntervalItem,
+    GradingScaleCalculationRules,
+    AssignedClassItem,
+    ClassAssignmentUpdate,
+    rules_to_json,
+    rules_from_json,
+    DEFAULT_CALCULATION_RULES,
 )
 from app.core.auth import get_current_user
 from app.models import User
 from app.services.id_gen import new_id
+from app.services.grading_scale import (
+    DEFAULT_INTERVAL_COLORS,
+    intervals_with_max,
+    validate_intervals,
+    used_by_label,
+)
 
 router = APIRouter(prefix="/assessment", tags=["assessment"])
 
@@ -33,23 +46,66 @@ def _interval_item(i: GradingScaleInterval) -> GradingScaleIntervalItem:
         threshold=i.threshold,
         grade_description=i.grade_description,
         gpa_points=i.gpa_points,
+        color=i.color,
     )
 
 
-def _scale_response(gs: GradingScale, db: Session) -> GradingScaleResponse:
-    intervals = (
+def _editor_name(user: User | None) -> str | None:
+    if not user:
+        return None
+    return user.full_name or user.email or user.id
+
+
+def _assigned_classes(db: Session, gs: GradingScale) -> list[AssignedClassItem]:
+    if gs.is_default:
+        rows = db.query(K12Class).filter(K12Class.grading_scale_id.is_(None)).order_by(K12Class.name).all()
+        return [
+            AssignedClassItem(id=r.id, name=r.name, academic_year_id=r.academic_year_id, uses_default=True)
+            for r in rows
+        ]
+    rows = (
+        db.query(K12Class)
+        .filter(K12Class.grading_scale_id == gs.id)
+        .order_by(K12Class.name)
+        .all()
+    )
+    return [
+        AssignedClassItem(id=r.id, name=r.name, academic_year_id=r.academic_year_id, uses_default=False)
+        for r in rows
+    ]
+
+
+def _scale_response(gs: GradingScale, db: Session, *, include_classes: bool = True) -> GradingScaleResponse:
+    interval_rows = (
         db.query(GradingScaleInterval)
         .filter(GradingScaleInterval.parent_id == gs.id)
         .order_by(GradingScaleInterval.threshold.desc())
         .all()
     )
+    raw_intervals = [_interval_item(i) for i in interval_rows]
+    intervals = intervals_with_max(raw_intervals)
+    gpas = [i.gpa_points for i in intervals if i.gpa_points is not None]
+    assigned = _assigned_classes(db, gs) if include_classes else []
+    valid, msg = validate_intervals(raw_intervals)
+    label_names = [c.name for c in assigned] if assigned else []
     return GradingScaleResponse(
         id=gs.id,
         grading_scale_name=gs.grading_scale_name,
         description=gs.description,
         is_default=bool(gs.is_default),
-        intervals=[_interval_item(i) for i in intervals],
+        intervals=intervals,
+        calculation_rules=rules_from_json(gs.calculation_rules),
         docstatus=gs.docstatus,
+        range_count=len(intervals),
+        gpa_min=min(gpas) if gpas else None,
+        gpa_max=max(gpas) if gpas else None,
+        class_count=len(assigned),
+        used_by_label=used_by_label(label_names),
+        updated_at=gs.updated_at,
+        updated_by_name=gs.updated_by_name,
+        assigned_classes=assigned,
+        intervals_valid=valid,
+        intervals_validation_message=msg,
     )
 
 
@@ -59,6 +115,32 @@ def _clear_default_scales(db: Session, except_id: str | None = None) -> None:
         q = q.filter(GradingScale.id != except_id)
     for row in q.all():
         row.is_default = False
+
+
+def _persist_intervals(db: Session, scale_id: str, items: list[GradingScaleIntervalItem]) -> None:
+    valid, msg = validate_intervals(items)
+    if not valid:
+        raise HTTPException(status_code=400, detail=msg or "Invalid grade ranges")
+    db.query(GradingScaleInterval).filter(GradingScaleInterval.parent_id == scale_id).delete()
+    sorted_items = sorted(items, key=lambda x: x.threshold, reverse=True)
+    for i, inv in enumerate(sorted_items):
+        color = inv.color or DEFAULT_INTERVAL_COLORS[i % len(DEFAULT_INTERVAL_COLORS)]
+        db.add(
+            GradingScaleInterval(
+                id=new_id("GSI"),
+                parent_id=scale_id,
+                grade_code=inv.grade_code.strip(),
+                threshold=inv.threshold,
+                grade_description=inv.grade_description,
+                gpa_points=inv.gpa_points,
+                color=color,
+                idx=i,
+            )
+        )
+
+
+def _touch_scale(gs: GradingScale, user: User | None) -> None:
+    gs.updated_by_name = _editor_name(user)
 
 
 @router.get("/grade")
@@ -87,36 +169,41 @@ def list_grading_scales(
     return [_scale_response(r, db) for r in rows]
 
 
+@router.get("/grading-scales/{scale_id}", response_model=GradingScaleResponse)
+def get_grading_scale(
+    scale_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
+    if not gs:
+        raise HTTPException(status_code=404, detail="Grading scale not found")
+    return _scale_response(gs, db)
+
+
 @router.post("/grading-scales", response_model=GradingScaleResponse)
 def create_grading_scale(
     body: GradingScaleCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if db.query(GradingScale).filter(GradingScale.grading_scale_name == body.grading_scale_name).first():
+    name = body.grading_scale_name.strip()
+    if db.query(GradingScale).filter(GradingScale.grading_scale_name == name).first():
         raise HTTPException(status_code=400, detail="Grading scale name already exists")
-    gid = body.grading_scale_name.replace(" ", "-")[:30]
+    gid = new_id("GSC")
     if body.is_default:
         _clear_default_scales(db)
+    rules = body.calculation_rules or DEFAULT_CALCULATION_RULES
     gs = GradingScale(
         id=gid,
-        grading_scale_name=body.grading_scale_name,
+        grading_scale_name=name,
         description=body.description,
         is_default=body.is_default,
+        calculation_rules=rules_to_json(rules),
+        updated_by_name=_editor_name(current_user),
     )
     db.add(gs)
-    for i, inv in enumerate(body.intervals):
-        db.add(
-            GradingScaleInterval(
-                id=new_id("GSI"),
-                parent_id=gid,
-                grade_code=inv.grade_code,
-                threshold=inv.threshold,
-                grade_description=inv.grade_description,
-                gpa_points=inv.gpa_points,
-                idx=i,
-            )
-        )
+    _persist_intervals(db, gid, body.intervals)
     db.commit()
     db.refresh(gs)
     return _scale_response(gs, db)
@@ -133,30 +220,134 @@ def update_grading_scale(
     if not gs:
         raise HTTPException(status_code=404, detail="Grading scale not found")
     if body.grading_scale_name is not None:
-        gs.grading_scale_name = body.grading_scale_name
+        new_name = body.grading_scale_name.strip()
+        existing = (
+            db.query(GradingScale)
+            .filter(GradingScale.grading_scale_name == new_name, GradingScale.id != scale_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="Grading scale name already exists")
+        gs.grading_scale_name = new_name
     if body.description is not None:
         gs.description = body.description
     if body.is_default is not None:
         if body.is_default:
             _clear_default_scales(db, except_id=scale_id)
         gs.is_default = body.is_default
+    if body.calculation_rules is not None:
+        gs.calculation_rules = rules_to_json(body.calculation_rules)
     if body.intervals is not None:
-        db.query(GradingScaleInterval).filter(GradingScaleInterval.parent_id == scale_id).delete()
-        for i, inv in enumerate(body.intervals):
-            db.add(
-                GradingScaleInterval(
-                    id=new_id("GSI"),
-                    parent_id=scale_id,
-                    grade_code=inv.grade_code,
-                    threshold=inv.threshold,
-                    grade_description=inv.grade_description,
-                    gpa_points=inv.gpa_points,
-                    idx=i,
-                )
-            )
+        _persist_intervals(db, scale_id, body.intervals)
+    _touch_scale(gs, current_user)
     db.commit()
     db.refresh(gs)
     return _scale_response(gs, db)
+
+
+@router.post("/grading-scales/{scale_id}/duplicate", response_model=GradingScaleResponse)
+def duplicate_grading_scale(
+    scale_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
+    if not gs:
+        raise HTTPException(status_code=404, detail="Grading scale not found")
+    base_name = f"Copy of {gs.grading_scale_name}"
+    name = base_name
+    n = 1
+    while db.query(GradingScale).filter(GradingScale.grading_scale_name == name).first():
+        n += 1
+        name = f"{base_name} ({n})"
+    intervals = (
+        db.query(GradingScaleInterval)
+        .filter(GradingScaleInterval.parent_id == scale_id)
+        .order_by(GradingScaleInterval.threshold.desc())
+        .all()
+    )
+    body = GradingScaleCreate(
+        grading_scale_name=name,
+        description=gs.description,
+        is_default=False,
+        intervals=[_interval_item(i) for i in intervals],
+        calculation_rules=rules_from_json(gs.calculation_rules),
+    )
+    return create_grading_scale(body, db, current_user)
+
+
+@router.delete("/grading-scales/{scale_id}", status_code=204)
+def delete_grading_scale(
+    scale_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
+    if not gs:
+        raise HTTPException(status_code=404, detail="Grading scale not found")
+    if gs.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete the default grade scale")
+    if db.query(K12Class).filter(K12Class.grading_scale_id == scale_id).first():
+        raise HTTPException(status_code=400, detail="Remove class assignments before deleting this scale")
+    if db.query(AssessmentPlan).filter(AssessmentPlan.grading_scale_id == scale_id).first():
+        raise HTTPException(status_code=400, detail="This scale is used by assessment plans")
+    db.delete(gs)
+    db.commit()
+
+
+@router.put("/grading-scales/{scale_id}/classes", response_model=GradingScaleResponse)
+def assign_grading_scale_classes(
+    scale_id: str,
+    body: ClassAssignmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
+    if not gs:
+        raise HTTPException(status_code=404, detail="Grading scale not found")
+    class_ids = set(body.class_ids)
+    if gs.is_default:
+        db.query(K12Class).filter(K12Class.grading_scale_id.isnot(None)).filter(
+            K12Class.id.in_(class_ids)
+        ).update({K12Class.grading_scale_id: None}, synchronize_session=False)
+        for cid in class_ids:
+            row = db.query(K12Class).filter(K12Class.id == cid).first()
+            if row:
+                row.grading_scale_id = None
+    else:
+        stale = db.query(K12Class).filter(K12Class.grading_scale_id == scale_id)
+        if class_ids:
+            stale = stale.filter(~K12Class.id.in_(class_ids))
+        stale.update({K12Class.grading_scale_id: None}, synchronize_session=False)
+        if class_ids:
+            db.query(K12Class).filter(K12Class.id.in_(class_ids)).update(
+                {K12Class.grading_scale_id: scale_id}, synchronize_session=False
+            )
+    _touch_scale(gs, current_user)
+    db.commit()
+    db.refresh(gs)
+    return _scale_response(gs, db)
+
+
+@router.get("/grading-scales/classes/available")
+def list_classes_for_assignment(
+    academic_year_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = db.query(K12Class)
+    if academic_year_id:
+        q = q.filter(K12Class.academic_year_id == academic_year_id)
+    rows = q.order_by(K12Class.name).all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "academic_year_id": r.academic_year_id,
+            "grading_scale_id": r.grading_scale_id,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/plans", response_model=list[AssessmentPlanResponse])

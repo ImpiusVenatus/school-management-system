@@ -32,6 +32,8 @@ class GradingScale(Base):
     grading_scale_name = Column(String, unique=True, nullable=False)
     description = Column(Text, nullable=True)
     is_default = Column(Boolean, default=False)
+    calculation_rules = Column(Text, nullable=True)
+    updated_by_name = Column(String(120), nullable=True)
     docstatus = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -50,6 +52,7 @@ class GradingScaleInterval(Base):
     threshold = Column(Float, default=0)  # percentage
     grade_description = Column(Text, nullable=True)
     gpa_points = Column(Float, nullable=True)
+    color = Column(String(20), nullable=True)
     idx = Column(Integer, default=0)
 
     grading_scale = relationship("GradingScale", back_populates="intervals")
