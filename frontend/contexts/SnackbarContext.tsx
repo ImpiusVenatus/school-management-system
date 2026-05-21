@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useRef, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, ReactNode } from "react";
 import { Snackbar, type SnackbarVariant } from "@/components/ui/Snackbar";
 
 type SnackbarContextType = {
@@ -35,13 +35,16 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const value: SnackbarContextType = {
-    show,
-    success: (m) => show(m, "success"),
-    error: (m) => show(m, "error", 6000),
-    info: (m) => show(m, "info"),
-    warning: (m) => show(m, "warning", 6000),
-  };
+  const value = useMemo<SnackbarContextType>(
+    () => ({
+      show,
+      success: (m) => show(m, "success"),
+      error: (m) => show(m, "error", 6000),
+      info: (m) => show(m, "info"),
+      warning: (m) => show(m, "warning", 6000),
+    }),
+    [show]
+  );
 
   return (
     <SnackbarContext.Provider value={value}>

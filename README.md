@@ -21,7 +21,13 @@ python -m venv venv
 # Activate venv (Windows: venv\Scripts\activate)
 pip install -r requirements.txt
 cp .env.example .env   # Set DATABASE_URL, SECRET_KEY
+# Dev only (blocked when ENVIRONMENT=production):
 python -c "from app.main import init_db; init_db()"
+# Or use migrations:
+# alembic upgrade head
+
+# Dev: wipe DB and run setup again:
+# python scripts/reset_db.py --yes
 fastapi dev app/main.py
 ```
 

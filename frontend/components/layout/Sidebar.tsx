@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
@@ -122,7 +122,6 @@ function buildNavGroups(_schoolType: string): NavGroup[] {
     {
       heading: "Academics",
       items: [
-        subjects,
         { href: "/dashboard/schedule", label: "Routine", icon: "calendar" },
         { href: "/dashboard/attendance", label: "Attendance", icon: "clipboard" },
         { href: "/dashboard/exam", label: "Exams", icon: "fileSearch" },
@@ -178,19 +177,28 @@ export function Sidebar({
 
   const navGroups = useMemo(() => buildNavGroups(schoolType), [schoolType]);
 
+  const yearIdRef = useRef<string | null>(null);
+
   const loadSchoolMeta = useCallback(() => {
     api<{ school_type?: string; current_academic_year_id?: string | null }>("/api/settings", {
       token: token ?? undefined,
     })
       .then(async (s) => {
         setSchoolType(s.school_type || "program");
-        if (s.current_academic_year_id) {
-          const years = await api<Array<{ id: string; academic_year_name: string }>>("/api/academic/years", {
-            token: token ?? undefined,
-          }).catch(() => []);
-          const y = years.find((yr) => yr.id === s.current_academic_year_id);
-          if (y) setAcademicYearLabel(y.academic_year_name);
+        const yearId = s.current_academic_year_id ?? null;
+        if (!yearId) {
+          setAcademicYearLabel(null);
+          yearIdRef.current = null;
+          return;
         }
+        if (yearId === yearIdRef.current) return;
+        yearIdRef.current = yearId;
+        const years = await api<Array<{ id: string; academic_year_name: string }>>(
+          "/api/academic/years?include_counts=false",
+          { token: token ?? undefined }
+        ).catch(() => []);
+        const y = years.find((yr) => yr.id === yearId);
+        setAcademicYearLabel(y?.academic_year_name ?? null);
       })
       .catch(() => {});
   }, [token]);

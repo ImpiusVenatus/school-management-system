@@ -4,13 +4,13 @@ export const inputClass =
   "w-full px-3 py-2 border border-[var(--border)] rounded-xl text-sm text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-[var(--border-strong)]";
 
 export const btnPrimary =
-  "py-2 px-4 rounded-xl bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity";
+  "cursor-pointer py-2 px-4 rounded-xl bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity";
 
 export const btnSecondary =
-  "py-2 px-4 rounded-xl border border-[var(--border)] bg-white text-sm font-medium text-[var(--foreground)] hover:border-[var(--border-strong)] disabled:opacity-50";
+  "cursor-pointer py-2 px-4 rounded-xl border border-[var(--border)] bg-white text-sm font-medium text-[var(--foreground)] hover:border-[var(--border-strong)] disabled:opacity-50 disabled:cursor-not-allowed";
 
 export const btnDanger =
-  "py-2 px-4 rounded-xl bg-[var(--accent-red)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50";
+  "cursor-pointer py-2 px-4 rounded-xl bg-[var(--accent-red)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed";
 
 export const linkAccent = "text-[var(--foreground)] font-medium hover:underline";
 
