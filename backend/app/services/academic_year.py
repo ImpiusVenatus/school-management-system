@@ -1,14 +1,24 @@
 """Academic year naming and date ranges from school cycle settings."""
 from datetime import date
 
+CYCLE_LABELS: dict[int, str] = {
+    1: "January – December",
+    4: "April – March",
+    6: "June – May",
+    9: "September – August",
+}
+
+
+def cycle_label_for_month(start_month: int) -> str:
+    return CYCLE_LABELS.get(start_month, f"Month {start_month} – prior month")
+
 
 def year_range_for_start_month(start_month: int, label_end_year: int) -> tuple[date, date]:
     """e.g. start_month=4, label_end_year=2027 → Apr 1 2026 – Mar 31 2027."""
     from calendar import monthrange
 
     if start_month == 1:
-        y = label_end_year - 1
-        return date(y, 1, 1), date(y, 12, 31)
+        return date(label_end_year, 1, 1), date(label_end_year, 12, 31)
     start_year = label_end_year - 1
     end_month = start_month - 1
     end_year = label_end_year

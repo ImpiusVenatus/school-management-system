@@ -2,6 +2,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Union
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
@@ -18,8 +19,10 @@ from app.schemas.academic import (
     AcademicYearUpdate,
     AcademicYearResponse,
     AcademicYearSummaryResponse,
+    AcademicYearLiteResponse,
     AcademicYearDetailResponse,
     AcademicYearCreateBody,
+    AcademicYearSuggestResponse,
     AcademicTermCreate,
     AcademicTermUpdate,
     AcademicTermResponse,
@@ -31,6 +34,7 @@ from app.services.academic_year import (
     year_range_for_start_month,
     suggest_ay_name,
     parse_label_end_year,
+    cycle_label_for_month,
 )
 
 router = APIRouter(prefix="/academic", tags=["academic"])
@@ -80,8 +84,9 @@ def _year_summary(db: Session, r: AcademicYear, active_id: str | None, school_ty
     )
 
 
-@router.get("/years", response_model=list[AcademicYearSummaryResponse])
+@router.get("/years", response_model=list[Union[AcademicYearSummaryResponse, AcademicYearLiteResponse]])
 def list_academic_years(
+    include_counts: bool = Query(True, description="Set false for dropdowns (skips class/section/student counts)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -89,7 +94,38 @@ def list_academic_years(
     school_type = settings.school_type or "program"
     active_id = settings.current_academic_year_id
     rows = db.query(AcademicYear).order_by(AcademicYear.year_start_date.desc()).all()
-    return [_year_summary(db, r, active_id, school_type) for r in rows]
+    if include_counts:
+        return [_year_summary(db, r, active_id, school_type) for r in rows]
+    return [
+        AcademicYearLiteResponse(
+            id=r.id,
+            academic_year_name=r.academic_year_name,
+            year_start_date=r.year_start_date,
+            year_end_date=r.year_end_date,
+            status=r.status or "closed",
+            is_active=r.id == active_id,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/years/suggest", response_model=AcademicYearSuggestResponse)
+def suggest_academic_year(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    settings = _get_settings(db)
+    start_month = settings.academic_year_start_month or 1
+    name = suggest_ay_name(start_month)
+    end_y = parse_label_end_year(name)
+    start_d, end_d = year_range_for_start_month(start_month, end_y)
+    return AcademicYearSuggestResponse(
+        academic_year_name=name,
+        year_start_date=start_d,
+        year_end_date=end_d,
+        start_month=start_month,
+        cycle_label=cycle_label_for_month(start_month),
+    )
 
 
 @router.post("/years", response_model=AcademicYearResponse)
@@ -99,7 +135,7 @@ def create_academic_year(
     current_user: User = Depends(get_current_user),
 ):
     settings = _get_settings(db)
-    start_month = settings.academic_year_start_month or 4
+    start_month = settings.academic_year_start_month or 1
     name = body.academic_year_name or suggest_ay_name(start_month)
     if db.query(AcademicYear).filter(AcademicYear.academic_year_name == name).first():
         raise HTTPException(status_code=400, detail="Academic year name already exists")
@@ -179,7 +215,13 @@ def update_academic_year(
         setattr(row, k, v)
     db.commit()
     db.refresh(row)
-    return row
+    return AcademicYearResponse(
+        id=row.id,
+        academic_year_name=row.academic_year_name,
+        year_start_date=row.year_start_date,
+        year_end_date=row.year_end_date,
+        status=row.status or "closed",
+    )
 
 
 @router.get("/years/{year_id}", response_model=AcademicYearResponse)
@@ -242,7 +284,7 @@ def list_academic_terms(
     q = db.query(AcademicTerm)
     if academic_year_id:
         q = q.filter(AcademicTerm.academic_year_id == academic_year_id)
-    rows = q.order_by(AcademicTerm.term_start_date.desc()).all()
+    rows = q.order_by(AcademicTerm.term_start_date.asc()).all()
     return [
         AcademicTermResponse(
             id=r.id,
@@ -277,4 +319,56 @@ def create_academic_term(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return AcademicTermResponse(
+        id=row.id,
+        academic_year_id=row.academic_year_id,
+        term_name=row.term_name,
+        term_start_date=row.term_start_date,
+        term_end_date=row.term_end_date,
+        title=row.title,
+    )
+
+
+@router.patch("/terms/{term_id}", response_model=AcademicTermResponse)
+def update_academic_term(
+    term_id: str,
+    body: AcademicTermUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.query(AcademicTerm).filter(AcademicTerm.id == term_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Term not found")
+    data = body.model_dump(exclude_unset=True)
+    if "term_name" in data:
+        row.term_name = data["term_name"]
+    if "term_start_date" in data:
+        row.term_start_date = data["term_start_date"]
+    if "term_end_date" in data:
+        row.term_end_date = data["term_end_date"]
+    if "academic_year_id" in data:
+        row.academic_year_id = data["academic_year_id"]
+    row.title = f"{row.term_name} ({row.academic_year_id})"
+    db.commit()
+    db.refresh(row)
+    return AcademicTermResponse(
+        id=row.id,
+        academic_year_id=row.academic_year_id,
+        term_name=row.term_name,
+        term_start_date=row.term_start_date,
+        term_end_date=row.term_end_date,
+        title=row.title,
+    )
+
+
+@router.delete("/terms/{term_id}", status_code=204)
+def delete_academic_term(
+    term_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.query(AcademicTerm).filter(AcademicTerm.id == term_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Term not found")
+    db.delete(row)
+    db.commit()

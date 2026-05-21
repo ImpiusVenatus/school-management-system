@@ -28,6 +28,11 @@ class AcademicYearResponse(AcademicYearBase):
         from_attributes = True
 
 
+class AcademicYearLiteResponse(AcademicYearResponse):
+    """Year row without per-year class/section/student counts (faster list)."""
+    is_active: bool = False
+
+
 class AcademicYearSummaryResponse(AcademicYearResponse):
     is_active: bool = False
     class_count: int = 0
@@ -49,6 +54,14 @@ class AcademicYearCreateBody(BaseModel):
     year_start_date: date | None = None
     year_end_date: date | None = None
     set_active: bool = True
+
+
+class AcademicYearSuggestResponse(BaseModel):
+    academic_year_name: str
+    year_start_date: date
+    year_end_date: date
+    start_month: int
+    cycle_label: str
 
 
 class AcademicTermBase(BaseModel):

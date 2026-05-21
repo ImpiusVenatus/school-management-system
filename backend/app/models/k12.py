@@ -1,5 +1,5 @@
 """K-12 academic structure: classes, sections, subjects, enrollments."""
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Time, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -13,6 +13,7 @@ class K12Class(Base):
     academic_year_id = Column(String, ForeignKey("academic_years.id"), nullable=False)
     name = Column(String(50), nullable=False)
     numeric_level = Column(Integer, nullable=True)
+    grading_scale_id = Column(String, ForeignKey("grading_scales.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -26,7 +27,7 @@ class K12Section(Base):
 
     id = Column(String, primary_key=True, index=True)
     class_id = Column(String, ForeignKey("k12_classes.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(10), nullable=False)
+    name = Column(String(50), nullable=False)
     class_teacher_id = Column(String, ForeignKey("instructors.id"), nullable=True)
     capacity = Column(Integer, default=40)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -43,11 +44,13 @@ class K12Subject(Base):
     name = Column(String(100), nullable=False)
     code = Column(String(20), unique=True, nullable=False)
     is_optional = Column(Boolean, default=False)
-    department = Column(String(50), nullable=True)
+    department_id = Column(String, ForeignKey("academic_departments.id", ondelete="SET NULL"), nullable=True)
     grades_label = Column(String(30), nullable=True)
     periods_per_week = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    department = relationship("AcademicDepartment", foreign_keys=[department_id])
 
 
 class K12ClassSubject(Base):
@@ -78,6 +81,22 @@ class K12StudentEnrollment(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     section = relationship("K12Section", back_populates="enrollments")
+
+
+class K12TimetableSlot(Base):
+    __tablename__ = "k12_timetable_slots"
+
+    id = Column(String, primary_key=True, index=True)
+    class_id = Column(String, ForeignKey("k12_classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_id = Column(String, ForeignKey("k12_sections.id", ondelete="CASCADE"), nullable=True)
+    subject_id = Column(String, ForeignKey("k12_subjects.id", ondelete="CASCADE"), nullable=False)
+    instructor_id = Column(String, ForeignKey("instructors.id", ondelete="SET NULL"), nullable=True)
+    room_id = Column(String, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday … 6=Sunday
+    from_time = Column(Time, nullable=False)
+    to_time = Column(Time, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class K12TeacherSubject(Base):
