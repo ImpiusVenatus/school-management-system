@@ -6,6 +6,7 @@ import { DataCard } from "@/components/ui/DataCard";
 import { DashboardCard } from "@/components/ui/DashboardCard";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSchoolSettings } from "@/contexts/SchoolSettingsContext";
 
 type AttendanceRow = {
   student_group_id?: string | null;
@@ -123,6 +124,7 @@ function DonutChart({ percent }: { percent: number }) {
 
 export default function DashboardPage() {
   const { token, user, hasPermission } = useAuth();
+  const { formatMoney } = useSchoolSettings();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const [stats, setStats] = useState<{
@@ -379,7 +381,7 @@ export default function DashboardPage() {
                       <span className="text-right">
                         <span className="font-medium text-[var(--foreground)]">{b.count}</span>
                         <span className="text-[var(--muted-light)] text-xs ml-1">
-                          · {b.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          · {formatMoney(b.amount)}
                         </span>
                       </span>
                     </li>
@@ -387,7 +389,7 @@ export default function DashboardPage() {
                 })}
                 {feesTotal > 0 && (
                   <li className="text-[11px] text-[var(--muted-light)] pt-1 border-t border-[var(--border)]">
-                    Total billed: {feesTotal.toLocaleString()}
+                    Total billed: {formatMoney(feesTotal)}
                   </li>
                 )}
               </ul>

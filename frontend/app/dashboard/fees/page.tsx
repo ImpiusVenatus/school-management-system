@@ -6,12 +6,14 @@ import { SelectField } from "@/components/ui/SelectField";
 import { Modal } from "@/components/ui/Modal";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSchoolSettings } from "@/contexts/SchoolSettingsContext";
 
 type Invoice = { id: string; student_id: string; period_label: string; due_date: string; total: number; status: string };
 type FeeStructure = { id: string; program_id: string; total_amount: number | null };
 
 export default function FeesPage() {
   const { token, hasPermission } = useAuth();
+  const { formatMoney } = useSchoolSettings();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [structures, setStructures] = useState<FeeStructure[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
@@ -112,7 +114,7 @@ export default function FeesPage() {
                 <td className="py-2">{inv.student_id}</td>
                 <td className="py-2">{inv.period_label}</td>
                 <td className="py-2">{inv.due_date}</td>
-                <td className="py-2">{inv.total}</td>
+                <td className="py-2 tabular-nums">{formatMoney(inv.total, { maximumFractionDigits: 2 })}</td>
                 <td className="py-2 capitalize">{inv.status}</td>
               </tr>
             ))}
@@ -128,7 +130,10 @@ export default function FeesPage() {
           <SelectField
             label="Fee structure"
             required
-            options={structures.map((s) => ({ value: s.id, label: `${s.id} (${s.total_amount})` }))}
+            options={structures.map((s) => ({
+              value: s.id,
+              label: `${s.id} (${s.total_amount != null ? formatMoney(s.total_amount) : "—"})`,
+            }))}
             value={structureId}
             onChange={setStructureId}
             placeholder="Select fee structure"
