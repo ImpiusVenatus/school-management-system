@@ -24,7 +24,7 @@ def structure_annual_total(components: list) -> float:
 
 
 def monthly_display_total(components: list) -> float:
-    """Sum of line amounts where frequency is Monthly (for class list subtitle)."""
+    """Sum of line amounts where frequency is Monthly (legacy; prefer average_monthly_from_annual)."""
     total = 0.0
     for c in components:
         freq = (getattr(c, "frequency", None) or "Monthly").strip().lower()
@@ -32,3 +32,10 @@ def monthly_display_total(components: list) -> float:
             amt = float(getattr(c, "amount", 0) or 0)
             total += amt
     return round(total, 2)
+
+
+def average_monthly_from_annual(annual_total: float) -> float:
+    """Even spread of annual fees for class-list subtitle (mixed frequencies)."""
+    if annual_total <= 0:
+        return 0.0
+    return round(annual_total / 12, 2)

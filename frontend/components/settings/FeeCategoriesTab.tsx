@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -13,6 +13,8 @@ import { useSchoolSettings } from "@/contexts/SchoolSettingsContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { formatMoneyCompact } from "@/lib/currency";
 import { btnPrimary, btnSecondary, inputClass, labelClass } from "@/lib/ui";
+import { cachedGet, invalidateSettingsCache } from "@/lib/settings-cache";
+import { PageLoader, PulsingDots } from "@/components/ui/PulsingDotsLoader";
 
 type YearOption = { id: string; academic_year_name: string; is_active: boolean };
 
@@ -79,6 +81,13 @@ type DiscountRule = {
   auto_apply: boolean;
   is_enabled: boolean;
   student_count: number;
+};
+
+type FeeSettingsPage = {
+  categories: FeeCategory[];
+  board: BoardItem[];
+  payment_methods: PaymentMethod[];
+  discount_rules: DiscountRule[];
 };
 
 const FREQ_OPTIONS = [
@@ -191,6 +200,7 @@ export function FeeCategoriesTab({
   const [payFee, setPayFee] = useState("");
 
   const [ruleModal, setRuleModal] = useState(false);
+  const [editingRule, setEditingRule] = useState<DiscountRule | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [rulePercent, setRulePercent] = useState("10");
   const [ruleCriteria, setRuleCriteria] = useState("custom");
@@ -209,22 +219,27 @@ export function FeeCategoriesTab({
     | { type: "year"; yearId: string };
   type DiscardConfirmContext = { kind: "edit" } | { kind: "navigate"; action: StructureLeaveAction };
   const [discardConfirm, setDiscardConfirm] = useState<DiscardConfirmContext | null>(null);
+  const [deletePaymentTarget, setDeletePaymentTarget] = useState<PaymentMethod | null>(null);
+  const [deleteRuleTarget, setDeleteRuleTarget] = useState<DiscountRule | null>(null);
+  const [deleteFinanceLoading, setDeleteFinanceLoading] = useState(false);
 
   useEffect(() => {
     if (activeYearId && !yearId) setYearId(activeYearId);
   }, [activeYearId, yearId]);
 
+  const yearLoadedRef = useRef<string | null>(null);
+
   const loadCategories = useCallback(async () => {
-    const rows = await api<FeeCategory[]>("/api/fees/categories", opts);
+    const rows = await cachedGet<FeeCategory[]>("/api/fees/categories", opts);
     setAllCategories(rows);
-    const archived = rows.filter((c) => !c.is_active);
-    setArchivedCount(archived.length);
-    setCategories(showArchived ? archived : rows.filter((c) => c.is_active));
-  }, [token, showArchived]);
+  }, [token]);
 
   const loadBoard = useCallback(async () => {
     if (!yearId) return;
-    const rows = await api<BoardItem[]>(`/api/fees/structures/board?academic_year_id=${yearId}`, opts);
+    const rows = await cachedGet<BoardItem[]>(
+      `/api/fees/structures/board?academic_year_id=${yearId}`,
+      opts
+    );
     const sorted = sortBoard(rows);
     setBoard(sorted);
     setSelectedClassId((prev) =>
@@ -233,14 +248,14 @@ export function FeeCategoriesTab({
   }, [yearId, token]);
 
   const loadStructure = useCallback(
-    async (classId: string) => {
+    async (classId: string, force = false) => {
       if (!yearId) return;
+      const path = `/api/fees/structures/by-class/${classId}?academic_year_id=${yearId}`;
       setStructureLoading(true);
       try {
-        const detail = await api<FeeStructureDetail>(
-          `/api/fees/structures/by-class/${classId}?academic_year_id=${yearId}`,
-          opts
-        );
+        const detail = force
+          ? await api<FeeStructureDetail>(path, opts)
+          : await cachedGet<FeeStructureDetail>(path, opts, 30_000);
         setStructure(detail);
         setDraftItems(detail.components.map((c) => ({ ...c })));
         setStructureBaseline(JSON.stringify(detail.components));
@@ -257,7 +272,7 @@ export function FeeCategoriesTab({
   );
 
   const loadFinance = useCallback(async () => {
-    const data = await api<{ payment_methods: PaymentMethod[]; discount_rules: DiscountRule[] }>(
+    const data = await cachedGet<{ payment_methods: PaymentMethod[]; discount_rules: DiscountRule[] }>(
       "/api/fees/finance-extras",
       opts
     );
@@ -266,27 +281,42 @@ export function FeeCategoriesTab({
   }, [token]);
 
   const loadAll = useCallback(async () => {
+    if (!yearId) return;
     setLoading(true);
     try {
-      await Promise.all([loadCategories(), loadBoard(), loadFinance()]);
+      const data = await cachedGet<FeeSettingsPage>(
+        `/api/fees/settings-page?academic_year_id=${encodeURIComponent(yearId)}`,
+        opts
+      );
+      setAllCategories(data.categories);
+      const sorted = sortBoard(data.board);
+      setBoard(sorted);
+      setPaymentMethods(data.payment_methods);
+      setDiscountRules(data.discount_rules);
+      setSelectedClassId((prev) =>
+        prev && sorted.some((r) => r.class_id === prev) ? prev : sorted[0]?.class_id ?? null
+      );
     } catch {
       snackbar.error("Could not load fee settings");
     } finally {
       setLoading(false);
     }
-  }, [loadCategories, loadBoard, loadFinance, snackbar]);
+  }, [yearId, token, snackbar]);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    if (!yearId) return;
+    if (yearLoadedRef.current === yearId) return;
+    const isFirst = yearLoadedRef.current === null;
+    yearLoadedRef.current = yearId;
+    if (isFirst) loadAll();
+    else loadBoard();
+  }, [yearId, loadAll, loadBoard]);
 
   useEffect(() => {
-    loadCategories();
-  }, [showArchived, loadCategories]);
-
-  useEffect(() => {
-    if (yearId) loadBoard();
-  }, [yearId, loadBoard]);
+    const archived = allCategories.filter((c) => !c.is_active);
+    setArchivedCount(archived.length);
+    setCategories(showArchived ? archived : allCategories.filter((c) => c.is_active));
+  }, [showArchived, allCategories]);
 
   useEffect(() => {
     if (selectedClassId) loadStructure(selectedClassId);
@@ -351,6 +381,7 @@ export function FeeCategoriesTab({
       }
       setCatModal(false);
       setEditingCategory(null);
+      invalidateSettingsCache("/api/fees");
       await loadCategories();
     } catch (err) {
       snackbar.error(err instanceof Error ? err.message : "Failed");
@@ -360,15 +391,21 @@ export function FeeCategoriesTab({
   }
 
   async function toggleCategoryActive(cat: FeeCategory) {
+    const next = !cat.is_active;
+    setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, is_active: next } : c)));
+    setAllCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, is_active: next } : c)));
     try {
       const updated = await api<FeeCategory>(`/api/fees/categories/${cat.id}`, {
         ...opts,
         method: "PATCH",
-        body: JSON.stringify({ is_active: !cat.is_active }),
+        body: JSON.stringify({ is_active: next }),
       });
       setCategories((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-      await loadCategories();
+      setAllCategories((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      invalidateSettingsCache("/api/fees");
     } catch {
+      setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, is_active: cat.is_active } : c)));
+      setAllCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, is_active: cat.is_active } : c)));
       snackbar.error("Could not update category");
     }
   }
@@ -409,7 +446,19 @@ export function FeeCategoriesTab({
       setDraftItems(updated.components.map((c) => ({ ...c })));
       setStructureBaseline(JSON.stringify(updated.components));
       setStructureEditing(false);
-      await loadBoard();
+      invalidateSettingsCache("/api/fees");
+      setBoard((prev) =>
+        prev.map((row) =>
+          row.class_id === updated.program_id
+            ? {
+                ...row,
+                monthly_total: updated.monthly_total,
+                annual_total: updated.annual_total,
+                item_count: updated.components.length,
+              }
+            : row
+        )
+      );
       snackbar.success("Fee structure saved.");
     } catch (err) {
       if (attempt < 1 && isTransientSaveError(err)) {
@@ -580,14 +629,18 @@ export function FeeCategoriesTab({
   }
 
   async function togglePaymentMethod(pm: PaymentMethod) {
+    const next = !pm.is_enabled;
+    setPaymentMethods((prev) => prev.map((p) => (p.id === pm.id ? { ...p, is_enabled: next } : p)));
     try {
       const updated = await api<PaymentMethod>(`/api/fees/payment-methods/${pm.id}`, {
         ...opts,
         method: "PATCH",
-        body: JSON.stringify({ is_enabled: !pm.is_enabled }),
+        body: JSON.stringify({ is_enabled: next }),
       });
       setPaymentMethods((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      invalidateSettingsCache("/api/fees");
     } catch {
+      setPaymentMethods((prev) => prev.map((p) => (p.id === pm.id ? { ...p, is_enabled: pm.is_enabled } : p)));
       snackbar.error("Could not update payment method");
     }
   }
@@ -616,37 +669,102 @@ export function FeeCategoriesTab({
     }
   }
 
+  function openNewRuleModal() {
+    setEditingRule(null);
+    setRuleName("");
+    setRulePercent("10");
+    setRuleCriteria("custom");
+    setRuleModal(true);
+  }
+
+  function openEditRuleModal(rule: DiscountRule) {
+    setEditingRule(rule);
+    setRuleName(rule.name);
+    setRulePercent(String(rule.discount_percent));
+    setRuleCriteria(rule.criteria_type);
+    setRuleModal(true);
+  }
+
   async function toggleDiscountRule(rule: DiscountRule) {
+    const next = !rule.is_enabled;
+    setDiscountRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, is_enabled: next } : r)));
     try {
       const updated = await api<DiscountRule>(`/api/fees/discount-rules/${rule.id}`, {
         ...opts,
         method: "PATCH",
-        body: JSON.stringify({ is_enabled: !rule.is_enabled }),
+        body: JSON.stringify({ is_enabled: next }),
       });
       setDiscountRules((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      invalidateSettingsCache("/api/fees");
     } catch {
+      setDiscountRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, is_enabled: rule.is_enabled } : r)));
       snackbar.error("Could not update rule");
     }
   }
 
-  async function createDiscountRule(e: React.FormEvent) {
+  async function confirmDeletePayment() {
+    if (!deletePaymentTarget) return;
+    setDeleteFinanceLoading(true);
+    try {
+      await api(`/api/fees/payment-methods/${deletePaymentTarget.id}`, { ...opts, method: "DELETE" });
+      setPaymentMethods((prev) => prev.filter((p) => p.id !== deletePaymentTarget.id));
+      invalidateSettingsCache("/api/fees");
+      snackbar.success("Payment method removed.");
+      setDeletePaymentTarget(null);
+    } catch (err) {
+      snackbar.error(err instanceof Error ? err.message : "Could not delete payment method");
+    } finally {
+      setDeleteFinanceLoading(false);
+    }
+  }
+
+  async function confirmDeleteRule() {
+    if (!deleteRuleTarget) return;
+    setDeleteFinanceLoading(true);
+    try {
+      await api(`/api/fees/discount-rules/${deleteRuleTarget.id}`, { ...opts, method: "DELETE" });
+      setDiscountRules((prev) => prev.filter((r) => r.id !== deleteRuleTarget.id));
+      invalidateSettingsCache("/api/fees");
+      snackbar.success("Discount rule removed.");
+      setDeleteRuleTarget(null);
+    } catch (err) {
+      snackbar.error(err instanceof Error ? err.message : "Could not delete rule");
+    } finally {
+      setDeleteFinanceLoading(false);
+    }
+  }
+
+  async function submitDiscountRule(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
+    const payload = {
+      name: ruleName.trim(),
+      discount_percent: parseFloat(rulePercent) || 0,
+      criteria_type: ruleCriteria,
+      criteria_label: ruleCriteria.replace(/_/g, " "),
+      auto_apply: true,
+    };
     try {
-      const row = await api<DiscountRule>("/api/fees/discount-rules", {
-        ...opts,
-        method: "POST",
-        body: JSON.stringify({
-          name: ruleName.trim(),
-          discount_percent: parseFloat(rulePercent) || 0,
-          criteria_type: ruleCriteria,
-          criteria_label: ruleCriteria.replace(/_/g, " "),
-          auto_apply: true,
-        }),
-      });
-      setDiscountRules((prev) => [...prev, row]);
+      if (editingRule) {
+        const row = await api<DiscountRule>(`/api/fees/discount-rules/${editingRule.id}`, {
+          ...opts,
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+        setDiscountRules((prev) => prev.map((r) => (r.id === row.id ? row : r)));
+        snackbar.success("Discount rule updated.");
+      } else {
+        const row = await api<DiscountRule>("/api/fees/discount-rules", {
+          ...opts,
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        setDiscountRules((prev) => [...prev, row]);
+        snackbar.success("Discount rule added.");
+      }
       setRuleModal(false);
-      snackbar.success("Discount rule added.");
+      setEditingRule(null);
+      invalidateSettingsCache("/api/fees");
     } catch (err) {
       snackbar.error(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -693,7 +811,7 @@ export function FeeCategoriesTab({
 
       <Card className="p-0 overflow-hidden mb-8">
         {loading ? (
-          <p className="p-6 text-sm text-[var(--muted)]">Loading…</p>
+          <PageLoader minHeight="min-h-[12rem]" />
         ) : categories.length === 0 ? (
           <p className="p-6 text-sm text-[var(--muted)]">No fee categories. Add tuition, transport, etc.</p>
         ) : (
@@ -812,8 +930,8 @@ export function FeeCategoriesTab({
             {board.map((row) => {
               const selected = selectedClassId === row.class_id;
               const amountLabel =
-                row.monthly_total > 0
-                  ? `${formatMoney(row.monthly_total)} / mo`
+                row.item_count > 0 && row.annual_total > 0
+                  ? `${formatMoney(row.annual_total / 12)} / mo avg`
                   : row.item_count > 0
                     ? `${formatMoney(row.annual_total)} / yr`
                     : "—";
@@ -848,7 +966,9 @@ export function FeeCategoriesTab({
 
         <Card className="p-5 min-h-[360px] border border-[var(--border)]">
           {structureLoading ? (
-            <p className="text-sm text-[var(--muted)] py-12 text-center">Loading structure…</p>
+            <div className="py-12 flex justify-center">
+              <PulsingDots />
+            </div>
           ) : !structure ? (
             <p className="text-sm text-[var(--muted)] py-12 text-center">Select a class to view its fee structure.</p>
           ) : (
@@ -1062,43 +1182,60 @@ export function FeeCategoriesTab({
               + Gateway
             </button>
           </div>
+          {paymentMethods.length === 0 ? (
+            <p className="text-sm text-[var(--muted)] py-4">No payment methods yet. Add one with + Gateway.</p>
+          ) : (
           <ul className="space-y-3">
             {paymentMethods.map((pm) => (
               <li key={pm.id} className="flex items-start justify-between gap-3 py-2 border-b border-[var(--border)] last:border-0">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{pm.name}</p>
                   <p className="text-xs text-[var(--muted)]">{pm.fee_note || pm.provider || pm.method_type}</p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={pm.is_enabled}
-                  onClick={() => togglePaymentMethod(pm)}
-                  className={`shrink-0 w-10 h-5 rounded-full relative ${pm.is_enabled ? "bg-[var(--primary)]" : "bg-[var(--border)]"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${pm.is_enabled ? "left-5" : "left-0.5"}`}
-                  />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setDeletePaymentTarget(pm)}
+                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                    aria-label={`Delete ${pm.name}`}
+                  >
+                    <IconTrash className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={pm.is_enabled}
+                    onClick={() => togglePaymentMethod(pm)}
+                    className={`w-10 h-5 rounded-full relative ${pm.is_enabled ? "bg-[var(--primary)]" : "bg-[var(--border)]"}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${pm.is_enabled ? "left-5" : "left-0.5"}`}
+                    />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
+          )}
         </Card>
 
         <Card className="p-4">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-sm font-semibold">Discount & scholarship rules</h4>
-            <button type="button" onClick={() => setRuleModal(true)} className={`${btnSecondary} text-xs`}>
+            <button type="button" onClick={openNewRuleModal} className={`${btnSecondary} text-xs`}>
               + Rule
             </button>
           </div>
+          {discountRules.length === 0 ? (
+            <p className="text-sm text-[var(--muted)] py-4">No discount rules yet. Add one with + Rule.</p>
+          ) : (
           <ul className="space-y-3">
             {discountRules.map((rule) => (
               <li
                 key={rule.id}
                 className="flex items-start justify-between gap-3 py-2 border-b border-[var(--border)] last:border-0"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
                     {rule.name}{" "}
                     <span className="text-[var(--muted)] font-normal">
@@ -1111,20 +1248,38 @@ export function FeeCategoriesTab({
                     {rule.student_count > 0 ? ` · ${rule.student_count} students` : ""}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={rule.is_enabled}
-                  onClick={() => toggleDiscountRule(rule)}
-                  className={`shrink-0 w-10 h-5 rounded-full relative ${rule.is_enabled ? "bg-[var(--primary)]" : "bg-[var(--border)]"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${rule.is_enabled ? "left-5" : "left-0.5"}`}
-                  />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openEditRuleModal(rule)}
+                    className={`${btnSecondary} text-xs py-1.5 px-2.5`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteRuleTarget(rule)}
+                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                    aria-label={`Delete ${rule.name}`}
+                  >
+                    <IconTrash className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={rule.is_enabled}
+                    onClick={() => toggleDiscountRule(rule)}
+                    className={`w-10 h-5 rounded-full relative ${rule.is_enabled ? "bg-[var(--primary)]" : "bg-[var(--border)]"}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${rule.is_enabled ? "left-5" : "left-0.5"}`}
+                    />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
+          )}
         </Card>
       </div>
 
@@ -1222,8 +1377,13 @@ export function FeeCategoriesTab({
         </form>
       </Modal>
 
-      <Modal open={ruleModal} onClose={() => setRuleModal(false)} title="Add discount rule" size="md">
-        <form onSubmit={createDiscountRule} className="space-y-4">
+      <Modal
+        open={ruleModal}
+        onClose={() => !saving && setRuleModal(false)}
+        title={editingRule ? "Edit discount rule" : "Add discount rule"}
+        size="md"
+      >
+        <form onSubmit={submitDiscountRule} className="space-y-4">
           <input
             type="text"
             required
@@ -1257,7 +1417,7 @@ export function FeeCategoriesTab({
               Cancel
             </button>
             <button type="submit" disabled={saving} className={btnPrimary}>
-              Add
+              {editingRule ? "Save changes" : "Add"}
             </button>
           </div>
         </form>
@@ -1374,6 +1534,38 @@ export function FeeCategoriesTab({
         variant="danger"
       >
         <p>This line will be removed from the structure. Save the structure to apply the change permanently.</p>
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={deletePaymentTarget !== null}
+        onClose={() => !deleteFinanceLoading && setDeletePaymentTarget(null)}
+        onConfirm={confirmDeletePayment}
+        title="Delete payment method?"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={deleteFinanceLoading}
+      >
+        <p>
+          Remove <strong>{deletePaymentTarget?.name}</strong>? This cannot be undone. Invoices already recorded with this
+          method are not affected.
+        </p>
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={deleteRuleTarget !== null}
+        onClose={() => !deleteFinanceLoading && setDeleteRuleTarget(null)}
+        onConfirm={confirmDeleteRule}
+        title="Delete discount rule?"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={deleteFinanceLoading}
+      >
+        <p>
+          Remove <strong>{deleteRuleTarget?.name}</strong>? Students already assigned this discount will need to be
+          updated manually.
+        </p>
       </ConfirmModal>
     </>
   );

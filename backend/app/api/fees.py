@@ -39,12 +39,17 @@ from app.schemas.fee import (
     PaymentMethodResponse,
     PaymentMethodUpdate,
 )
-from app.services.fee_calc import monthly_display_total, structure_annual_total, yearly_from_amount
+from app.services.fee_calc import (
+    average_monthly_from_annual,
+    structure_annual_total,
+    yearly_from_amount,
+)
 from app.services.id_gen import new_id
 
 router = APIRouter(prefix="/fees", tags=["fees"])
 
 _finance_lock = threading.Lock()
+_finance_seeded = False
 
 
 # --- Category schemas (inline) ---
@@ -137,51 +142,16 @@ def _dedupe_discount_rules(db: Session) -> None:
 
 
 def _ensure_finance_defaults(db: Session) -> None:
-    """Seed defaults once; safe under parallel requests (payment + discount list)."""
+    """Dedupe finance rows once per process (no auto-seed; users add methods and rules)."""
+    global _finance_seeded
+    if _finance_seeded:
+        return
     with _finance_lock:
-        if db.query(PaymentMethod).count() == 0:
-            for i, row in enumerate(
-                [
-                    ("Cash at office", "cash", None, "2 cashiers · fee —"),
-                    ("UPI - Razorpay", "upi", "rzp_live_…", "fee 1.0% + ₹5"),
-                    ("Card - Razorpay", "card", "Razorpay", "auto-receipt · fee 1.95%"),
-                ]
-            ):
-                db.add(
-                    PaymentMethod(
-                        id=new_id("PAY"),
-                        name=row[0],
-                        method_type=row[1],
-                        provider=row[2],
-                        fee_note=row[3],
-                        is_enabled=True,
-                        sort_order=i,
-                    )
-                )
-        if db.query(FeeDiscountRule).count() == 0:
-            for i, row in enumerate(
-                [
-                    ("Sibling discount", 10.0, "sibling_2nd", "2nd child · auto", True, 0),
-                    ("Sibling discount", 25.0, "sibling_3rd", "3rd+ child · auto", True, 0),
-                    ("Staff children", 50.0, "staff_child", "staff · auto", True, 0),
-                ]
-            ):
-                db.add(
-                    FeeDiscountRule(
-                        id=new_id("DIS"),
-                        name=row[0],
-                        discount_percent=row[1],
-                        criteria_type=row[2],
-                        criteria_label=row[3],
-                        auto_apply=row[4],
-                        is_enabled=True,
-                        student_count=row[5],
-                        sort_order=i,
-                    )
-                )
-        db.commit()
+        if _finance_seeded:
+            return
         _dedupe_payment_methods(db)
         _dedupe_discount_rules(db)
+        _finance_seeded = True
 
 
 def _category_counts(db: Session) -> dict[str, int]:
@@ -271,7 +241,7 @@ def _structure_response(
     )
     items = [_component_item(c, cats) for c in comps]
     annual = structure_annual_total(comps)
-    monthly = monthly_display_total(comps)
+    monthly = average_monthly_from_annual(annual)
     updated = fs.updated_at.isoformat() if fs.updated_at else None
     return FeeStructureResponse(
         id=fs.id,
@@ -334,7 +304,6 @@ def list_fee_categories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_finance_defaults(db)
     q = db.query(FeeCategory).order_by(FeeCategory.name)
     if active_only is True:
         q = q.filter(FeeCategory.is_active == True)
@@ -394,12 +363,22 @@ def update_fee_category(
 # --- Structure board ---
 
 
-@router.get("/structures/board", response_model=list[FeeStructureBoardItem])
-def fee_structure_board(
+def _component_counts_by_structure(db: Session, structure_ids: list[str]) -> dict[str, int]:
+    if not structure_ids:
+        return {}
+    rows = (
+        db.query(FeeComponent.parent_id, func.count(FeeComponent.id))
+        .filter(FeeComponent.parent_id.in_(structure_ids))
+        .group_by(FeeComponent.parent_id)
+        .all()
+    )
+    return {sid: int(cnt) for sid, cnt in rows}
+
+
+def _build_fee_structure_board(
+    db: Session,
     academic_year_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+) -> list[FeeStructureBoardItem]:
     classes = (
         db.query(K12Class)
         .filter(K12Class.academic_year_id == academic_year_id)
@@ -409,27 +388,70 @@ def fee_structure_board(
     structures = {
         s.program_id: s
         for s in db.query(FeeStructure)
-        .options(joinedload(FeeStructure.components))
         .filter(FeeStructure.academic_year_id == academic_year_id)
         .all()
     }
+    structure_ids = [s.id for s in structures.values()]
+    item_counts = _component_counts_by_structure(db, structure_ids)
     student_counts = _student_counts_for_year(db, academic_year_id)
     out: list[FeeStructureBoardItem] = []
     for cls in classes:
         fs = structures.get(cls.id)
-        comps = fs.components if fs else []
+        annual = float(fs.total_amount or 0) if fs else 0.0
         out.append(
             FeeStructureBoardItem(
                 class_id=cls.id,
                 class_name=cls.name,
                 structure_id=fs.id if fs else None,
-                monthly_total=monthly_display_total(comps),
-                annual_total=structure_annual_total(comps) if comps else 0,
+                monthly_total=average_monthly_from_annual(annual),
+                annual_total=annual,
                 student_count=student_counts.get(cls.id, 0),
-                item_count=len(comps),
+                item_count=item_counts.get(fs.id, 0) if fs else 0,
             )
         )
     return out
+
+
+@router.get("/structures/board", response_model=list[FeeStructureBoardItem])
+def fee_structure_board(
+    academic_year_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _build_fee_structure_board(db, academic_year_id)
+
+
+class FeeSettingsPageResponse(BaseModel):
+    categories: list[FeeCategoryResponse]
+    board: list[FeeStructureBoardItem]
+    payment_methods: list[PaymentMethodResponse]
+    discount_rules: list[FeeDiscountRuleResponse]
+
+
+@router.get("/settings-page", response_model=FeeSettingsPageResponse)
+def get_fee_settings_page(
+    academic_year_id: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Categories, structure board, and finance extras in one request."""
+    _ensure_finance_defaults(db)
+    cat_rows = db.query(FeeCategory).order_by(FeeCategory.name).all()
+    counts = _category_counts(db)
+    payment_methods = [
+        PaymentMethodResponse.model_validate(r)
+        for r in db.query(PaymentMethod).order_by(PaymentMethod.sort_order, PaymentMethod.name).all()
+    ]
+    discount_rules = [
+        FeeDiscountRuleResponse.model_validate(r)
+        for r in db.query(FeeDiscountRule).order_by(FeeDiscountRule.sort_order, FeeDiscountRule.name).all()
+    ]
+    return FeeSettingsPageResponse(
+        categories=[_category_response(c, counts) for c in cat_rows],
+        board=_build_fee_structure_board(db, academic_year_id),
+        payment_methods=payment_methods,
+        discount_rules=discount_rules,
+    )
 
 
 @router.get("/structures/by-class/{class_id}", response_model=FeeStructureResponse)
@@ -645,7 +667,6 @@ def list_payment_methods(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_finance_defaults(db)
-    _dedupe_payment_methods(db)
     rows = db.query(PaymentMethod).order_by(PaymentMethod.sort_order, PaymentMethod.name).all()
     return [PaymentMethodResponse.model_validate(r) for r in rows]
 
@@ -714,8 +735,6 @@ def list_discount_rules(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_finance_defaults(db)
-    _dedupe_discount_rules(db)
     rows = db.query(FeeDiscountRule).order_by(FeeDiscountRule.sort_order, FeeDiscountRule.name).all()
     return [FeeDiscountRuleResponse.model_validate(r) for r in rows]
 
