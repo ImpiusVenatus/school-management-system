@@ -1,4 +1,9 @@
 """Grading scale interval validation and display helpers."""
+import re
+
+from sqlalchemy.orm import Session
+
+from app.models import GradingScale, GradingScaleInterval, K12Class
 from app.schemas.assessment import GradingScaleIntervalItem
 
 DEFAULT_INTERVAL_COLORS = [
@@ -56,10 +61,61 @@ def validate_intervals(items: list[GradingScaleIntervalItem]) -> tuple[bool, str
     return True, None
 
 
+def k12_class_sort_key(cls: K12Class) -> tuple[int, str]:
+    """Numeric order (Class 3 … Class 10), not lexicographic."""
+    if cls.numeric_level is not None:
+        return (int(cls.numeric_level), cls.name or "")
+    match = re.search(r"(\d+)", cls.name or "")
+    if match:
+        return (int(match.group(1)), cls.name or "")
+    return (9999, cls.name or "")
+
+
+def k12_class_name_sort_key(name: str) -> tuple[int, str]:
+    match = re.search(r"(\d+)", name or "")
+    if match:
+        return (int(match.group(1)), name or "")
+    return (9999, name or "")
+
+
+def resolve_grading_scale_for_class(db: Session, cls: K12Class) -> GradingScale | None:
+    if cls.grading_scale_id:
+        return db.query(GradingScale).filter(GradingScale.id == cls.grading_scale_id).first()
+    return db.query(GradingScale).filter(GradingScale.is_default == True).first()
+
+
+def pass_threshold_percent(db: Session, scale: GradingScale | None) -> int:
+    """Minimum % required to earn the lowest passing grade on the scale."""
+    if not scale:
+        return 40
+    rows = (
+        db.query(GradingScaleInterval)
+        .filter(GradingScaleInterval.parent_id == scale.id)
+        .order_by(GradingScaleInterval.threshold.asc())
+        .all()
+    )
+    if not rows:
+        return 40
+    passing = [r for r in rows if (r.gpa_points or 0) > 0]
+    if passing:
+        return int(passing[0].threshold or 0)
+    if len(rows) >= 2:
+        return int(rows[1].threshold or 0)
+    return 40
+
+
+def pass_marks_for_full(db: Session, cls: K12Class, full_marks: int) -> tuple[int, int]:
+    """Return (pass_marks, pass_threshold_percent) from the class grading scale."""
+    scale = resolve_grading_scale_for_class(db, cls)
+    pct = pass_threshold_percent(db, scale)
+    marks = max(1, round(full_marks * pct / 100))
+    return marks, pct
+
+
 def used_by_label(class_names: list[str]) -> str | None:
     if not class_names:
         return None
-    names = sorted(class_names, key=lambda x: (len(x), x))
+    names = sorted(class_names, key=k12_class_name_sort_key)
     if len(names) <= 3:
         return ", ".join(names)
     return f"{names[0]}–{names[-1]}"

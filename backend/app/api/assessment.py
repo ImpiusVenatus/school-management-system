@@ -33,6 +33,7 @@ from app.services.id_gen import new_id
 from app.services.grading_scale import (
     DEFAULT_INTERVAL_COLORS,
     intervals_with_max,
+    k12_class_sort_key,
     validate_intervals,
     used_by_label,
 )
@@ -58,19 +59,19 @@ def _editor_name(user: User | None) -> str | None:
 
 def _assigned_classes(db: Session, gs: GradingScale) -> list[AssignedClassItem]:
     if gs.is_default:
-        rows = db.query(K12Class).filter(K12Class.grading_scale_id.is_(None)).order_by(K12Class.name).all()
-        return [
-            AssignedClassItem(id=r.id, name=r.name, academic_year_id=r.academic_year_id, uses_default=True)
-            for r in rows
-        ]
-    rows = (
-        db.query(K12Class)
-        .filter(K12Class.grading_scale_id == gs.id)
-        .order_by(K12Class.name)
-        .all()
-    )
+        rows = db.query(K12Class).filter(K12Class.grading_scale_id.is_(None)).all()
+        uses_default = True
+    else:
+        rows = db.query(K12Class).filter(K12Class.grading_scale_id == gs.id).all()
+        uses_default = False
+    rows.sort(key=k12_class_sort_key)
     return [
-        AssignedClassItem(id=r.id, name=r.name, academic_year_id=r.academic_year_id, uses_default=False)
+        AssignedClassItem(
+            id=r.id,
+            name=r.name,
+            academic_year_id=r.academic_year_id,
+            uses_default=uses_default,
+        )
         for r in rows
     ]
 
@@ -338,7 +339,8 @@ def list_classes_for_assignment(
     q = db.query(K12Class)
     if academic_year_id:
         q = q.filter(K12Class.academic_year_id == academic_year_id)
-    rows = q.order_by(K12Class.name).all()
+    rows = q.all()
+    rows.sort(key=k12_class_sort_key)
     return [
         {
             "id": r.id,

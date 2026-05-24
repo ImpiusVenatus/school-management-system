@@ -9,6 +9,8 @@ import { TAB_META } from "@/components/settings/settings-nav";
 import { api } from "@/lib/api";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass, labelClass } from "@/lib/ui";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
+import { sortByClassName } from "@/lib/k12-class";
 
 type Interval = {
   row_id: string;
@@ -496,7 +498,7 @@ export function GradeScalesTab({ token }: { token?: string | null }) {
       />
 
       {loading ? (
-        <p className="text-sm text-[var(--muted)]">Loading…</p>
+        <PageLoader minHeight="min-h-[20rem]" />
       ) : scales.length === 0 ? (
         <Card>
           <p className="text-sm text-[var(--muted)] mb-4">No grade scales yet. Create your first scale to map percentages to letter grades.</p>
@@ -731,7 +733,7 @@ export function GradeScalesTab({ token }: { token?: string | null }) {
                     <p className="text-sm text-[var(--muted)]">No classes assigned yet.</p>
                   ) : (
                     <ul className="space-y-2 max-h-48 overflow-y-auto">
-                      {selected.assigned_classes.map((c) => (
+                      {sortByClassName(selected.assigned_classes).map((c) => (
                         <li
                           key={c.id}
                           className="flex items-center justify-between text-sm py-1.5 px-2 rounded-lg bg-neutral-50"
