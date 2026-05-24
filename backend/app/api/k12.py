@@ -1,7 +1,7 @@
 """K-12 academic structure API."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel, Field
 from datetime import date, time
 from app.database import get_db
@@ -21,6 +21,16 @@ from app.models import (
 from app.core.auth import get_current_user
 from app.models import User
 from app.services.id_gen import new_id
+from app.services.grading_scale import k12_class_sort_key, pass_marks_for_full, resolve_grading_scale_for_class
+from app.services.timetable import (
+    infer_period_index,
+    parse_weekdays,
+    period_times,
+    periods_per_day,
+    weekdays_to_json,
+)
+from app.api.academic_departments import _dept_response, _subject_counts_by_department
+from app.schemas.academic_department import AcademicDepartmentResponse
 
 router = APIRouter(prefix="/k12", tags=["k12"])
 
@@ -88,12 +98,28 @@ class ClassSubjectItem(BaseModel):
 class ClassSubjectAssign(BaseModel):
     subject_id: str
     full_marks: int = Field(default=100, ge=1, le=1000)
-    pass_marks: int = Field(default=40, ge=0, le=1000)
 
 
 class ClassSubjectMarksUpdate(BaseModel):
     full_marks: int | None = Field(default=None, ge=1, le=1000)
-    pass_marks: int | None = Field(default=None, ge=0, le=1000)
+
+
+class TimetableSettingsResponse(BaseModel):
+    weekdays: list[int]
+    periods_per_day: int
+    period_minutes: int
+    break_minutes: int
+    break_after_period: int
+    start_time: time
+
+
+class TimetableSettingsUpdate(BaseModel):
+    weekdays: list[int] = Field(min_length=1)
+    periods_per_day: int = Field(ge=1, le=12)
+    period_minutes: int = Field(ge=15, le=120)
+    break_minutes: int = Field(ge=0, le=90)
+    break_after_period: int = Field(ge=0, le=12)
+    start_time: time
 
 
 class TimetableSlotCreate(BaseModel):
@@ -102,8 +128,7 @@ class TimetableSlotCreate(BaseModel):
     instructor_id: str | None = None
     room_id: str | None = None
     day_of_week: int = Field(ge=0, le=6)
-    from_time: time
-    to_time: time
+    period_index: int = Field(ge=0, le=11)
 
 
 class TimetableSlotResponse(BaseModel):
@@ -119,6 +144,7 @@ class TimetableSlotResponse(BaseModel):
     room_name: str | None
     section_name: str | None
     day_of_week: int
+    period_index: int
     from_time: time
     to_time: time
 
@@ -138,7 +164,10 @@ class ClassSetupResponse(BaseModel):
     academic_year_id: str
     subjects: list[ClassSubjectItem]
     timetable: list[TimetableSlotResponse]
+    timetable_settings: TimetableSettingsResponse
     sections: list[SectionSetupItem]
+    pass_threshold_percent: int = 40
+    grading_scale_name: str | None = None
 
 
 class ClassCreateResponse(BaseModel):
@@ -175,6 +204,17 @@ class SubjectResponse(BaseModel):
     grades_label: str | None = None
 
 
+class SubjectOptionResponse(BaseModel):
+    id: str
+    name: str
+    code: str
+
+
+class SubjectsPageResponse(BaseModel):
+    subjects: list[SubjectResponse]
+    departments: list[AcademicDepartmentResponse]
+
+
 class EnrollmentCreate(BaseModel):
     student_id: str
     section_id: str
@@ -197,7 +237,18 @@ def list_classes(
 @router.post("/classes", response_model=ClassCreateResponse)
 def create_class(body: ClassCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     cid = new_id("CLS")
-    row = K12Class(id=cid, academic_year_id=body.academic_year_id, name=body.name, numeric_level=body.numeric_level)
+    row = K12Class(
+        id=cid,
+        academic_year_id=body.academic_year_id,
+        name=body.name,
+        numeric_level=body.numeric_level,
+        timetable_weekdays=weekdays_to_json([0, 1, 2, 3, 4]),
+        timetable_periods_per_day=8,
+        timetable_period_minutes=45,
+        timetable_break_minutes=20,
+        timetable_break_after_period=4,
+        timetable_start_time=time(8, 0),
+    )
     db.add(row)
     sections: list[K12Section] = []
     if body.initial_section:
@@ -228,12 +279,8 @@ def classes_with_sections(
     current_user: User = Depends(get_current_user),
 ):
     """Classes with nested sections and student counts for settings UI."""
-    classes = (
-        db.query(K12Class)
-        .filter(K12Class.academic_year_id == academic_year_id)
-        .order_by(K12Class.created_at.asc())
-        .all()
-    )
+    classes = db.query(K12Class).filter(K12Class.academic_year_id == academic_year_id).all()
+    classes.sort(key=k12_class_sort_key)
     section_rows = (
         db.query(K12Section)
         .join(K12Class, K12Section.class_id == K12Class.id)
@@ -337,11 +384,9 @@ def create_section(body: SectionCreate, db: Session = Depends(get_db), current_u
     return row
 
 
-def _subject_response(db: Session, row: K12Subject) -> SubjectResponse:
-    dept_name = None
-    if row.department_id:
-        d = db.query(AcademicDepartment).filter(AcademicDepartment.id == row.department_id).first()
-        dept_name = d.name if d else None
+def _subject_response(row: K12Subject) -> SubjectResponse:
+    dept = getattr(row, "department", None)
+    dept_name = dept.name if dept else None
     return SubjectResponse(
         id=row.id,
         name=row.name,
@@ -353,6 +398,15 @@ def _subject_response(db: Session, row: K12Subject) -> SubjectResponse:
     )
 
 
+def _load_subject_with_department(db: Session, subject_id: str) -> K12Subject | None:
+    return (
+        db.query(K12Subject)
+        .options(joinedload(K12Subject.department))
+        .filter(K12Subject.id == subject_id)
+        .first()
+    )
+
+
 def _validate_department_id(db: Session, department_id: str | None) -> None:
     if department_id and not db.query(AcademicDepartment).filter(AcademicDepartment.id == department_id).first():
         raise HTTPException(status_code=400, detail="Department not found")
@@ -360,8 +414,42 @@ def _validate_department_id(db: Session, department_id: str | None) -> None:
 
 @router.get("/subjects", response_model=list[SubjectResponse])
 def list_subjects(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    rows = db.query(K12Subject).order_by(K12Subject.name).all()
-    return [_subject_response(db, r) for r in rows]
+    rows = (
+        db.query(K12Subject)
+        .options(joinedload(K12Subject.department))
+        .order_by(K12Subject.name)
+        .all()
+    )
+    return [_subject_response(r) for r in rows]
+
+
+@router.get("/subjects/options", response_model=list[SubjectOptionResponse])
+def list_subject_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = db.query(K12Subject.id, K12Subject.name, K12Subject.code).order_by(K12Subject.name).all()
+    return [SubjectOptionResponse(id=r.id, name=r.name, code=r.code) for r in rows]
+
+
+@router.get("/subjects-page", response_model=SubjectsPageResponse)
+def get_subjects_page(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Subjects + departments for settings tab in one round-trip."""
+    subject_rows = (
+        db.query(K12Subject)
+        .options(joinedload(K12Subject.department))
+        .order_by(K12Subject.name)
+        .all()
+    )
+    dept_rows = db.query(AcademicDepartment).order_by(AcademicDepartment.name).all()
+    counts = _subject_counts_by_department(db)
+    return SubjectsPageResponse(
+        subjects=[_subject_response(r) for r in subject_rows],
+        departments=[_dept_response(r, counts) for r in dept_rows],
+    )
 
 
 @router.post("/subjects", response_model=SubjectResponse)
@@ -380,8 +468,8 @@ def create_subject(body: SubjectCreate, db: Session = Depends(get_db), current_u
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
-    return _subject_response(db, row)
+    loaded = _load_subject_with_department(db, sid)
+    return _subject_response(loaded or row)
 
 
 @router.patch("/subjects/{subject_id}", response_model=SubjectResponse)
@@ -410,8 +498,8 @@ def update_subject(
     if body.grades_label is not None:
         row.grades_label = body.grades_label or None
     db.commit()
-    db.refresh(row)
-    return _subject_response(db, row)
+    loaded = _load_subject_with_department(db, subject_id)
+    return _subject_response(loaded or row)
 
 
 @router.delete("/subjects/{subject_id}", status_code=204)
@@ -438,11 +526,38 @@ def _get_class_or_404(class_id: str, db: Session) -> K12Class:
     return row
 
 
-def _timetable_slot_response(db: Session, row: K12TimetableSlot) -> TimetableSlotResponse:
-    sub = db.query(K12Subject).filter(K12Subject.id == row.subject_id).first()
-    inst = db.query(Instructor).filter(Instructor.id == row.instructor_id).first() if row.instructor_id else None
-    room = db.query(Room).filter(Room.id == row.room_id).first() if row.room_id else None
-    sec = db.query(K12Section).filter(K12Section.id == row.section_id).first() if row.section_id else None
+def _timetable_settings_response(cls: K12Class) -> TimetableSettingsResponse:
+    return TimetableSettingsResponse(
+        weekdays=parse_weekdays(cls.timetable_weekdays),
+        periods_per_day=periods_per_day(cls),
+        period_minutes=cls.timetable_period_minutes or 45,
+        break_minutes=cls.timetable_break_minutes if cls.timetable_break_minutes is not None else 20,
+        break_after_period=cls.timetable_break_after_period if cls.timetable_break_after_period is not None else 4,
+        start_time=cls.timetable_start_time or time(8, 0),
+    )
+
+
+def _slot_period_index(cls: K12Class, row: K12TimetableSlot) -> int:
+    if row.period_index is not None:
+        return row.period_index
+    inferred = infer_period_index(cls, row.from_time)
+    return inferred if inferred is not None else 0
+
+
+def _timetable_slot_response(
+    row: K12TimetableSlot,
+    *,
+    cls: K12Class,
+    subjects: dict[str, K12Subject],
+    instructors: dict[str, Instructor],
+    rooms: dict[str, Room],
+    sections: dict[str, K12Section],
+) -> TimetableSlotResponse:
+    sub = subjects.get(row.subject_id)
+    inst = instructors.get(row.instructor_id) if row.instructor_id else None
+    room = rooms.get(row.room_id) if row.room_id else None
+    sec = sections.get(row.section_id) if row.section_id else None
+    pidx = _slot_period_index(cls, row)
     return TimetableSlotResponse(
         id=row.id,
         class_id=row.class_id,
@@ -456,8 +571,56 @@ def _timetable_slot_response(db: Session, row: K12TimetableSlot) -> TimetableSlo
         room_name=room.room_name if room else None,
         section_name=sec.name if sec else None,
         day_of_week=row.day_of_week,
+        period_index=pidx,
         from_time=row.from_time,
         to_time=row.to_time,
+    )
+
+
+def _load_lookup_maps(
+    db: Session,
+    subject_ids: set[str],
+    instructor_ids: set[str],
+    room_ids: set[str],
+    section_ids: set[str],
+) -> tuple[dict[str, K12Subject], dict[str, Instructor], dict[str, Room], dict[str, K12Section]]:
+    subjects = (
+        {r.id: r for r in db.query(K12Subject).filter(K12Subject.id.in_(subject_ids)).all()}
+        if subject_ids
+        else {}
+    )
+    instructors = (
+        {r.id: r for r in db.query(Instructor).filter(Instructor.id.in_(instructor_ids)).all()}
+        if instructor_ids
+        else {}
+    )
+    rooms = (
+        {r.id: r for r in db.query(Room).filter(Room.id.in_(room_ids)).all()} if room_ids else {}
+    )
+    sections = (
+        {r.id: r for r in db.query(K12Section).filter(K12Section.id.in_(section_ids)).all()}
+        if section_ids
+        else {}
+    )
+    return subjects, instructors, rooms, sections
+
+
+def _timetable_slot_response_db(db: Session, row: K12TimetableSlot) -> TimetableSlotResponse:
+    cls = _get_class_or_404(row.class_id, db)
+    subject_ids = {row.subject_id}
+    instructor_ids = {row.instructor_id} if row.instructor_id else set()
+    room_ids = {row.room_id} if row.room_id else set()
+    section_ids = {row.section_id} if row.section_id else set()
+    sub_map, inst_map, room_map, sec_map = _load_lookup_maps(
+        db, subject_ids, instructor_ids, room_ids, section_ids
+    )
+    return _timetable_slot_response(
+        row,
+        cls=cls,
+        subjects=sub_map,
+        instructors=inst_map,
+        rooms=room_map,
+        sections=sec_map,
     )
 
 
@@ -468,10 +631,18 @@ def get_class_setup(
     current_user: User = Depends(get_current_user),
 ):
     cls = _get_class_or_404(class_id, db)
+    scale = resolve_grading_scale_for_class(db, cls)
+    _, pass_pct = pass_marks_for_full(db, cls, 100)
     links = db.query(K12ClassSubject).filter(K12ClassSubject.class_id == class_id).all()
+    link_subject_ids = {link.subject_id for link in links}
+    subject_by_id = (
+        {r.id: r for r in db.query(K12Subject).filter(K12Subject.id.in_(link_subject_ids)).all()}
+        if link_subject_ids
+        else {}
+    )
     subjects: list[ClassSubjectItem] = []
     for link in links:
-        sub = db.query(K12Subject).filter(K12Subject.id == link.subject_id).first()
+        sub = subject_by_id.get(link.subject_id)
         if not sub:
             continue
         subjects.append(
@@ -490,13 +661,28 @@ def get_class_setup(
         .order_by(K12TimetableSlot.day_of_week, K12TimetableSlot.from_time)
         .all()
     )
+    slot_subject_ids = {s.subject_id for s in slots}
+    slot_instructor_ids = {s.instructor_id for s in slots if s.instructor_id}
+    slot_room_ids = {s.room_id for s in slots if s.room_id}
+    slot_section_ids = {s.section_id for s in slots if s.section_id}
+    sub_map, inst_map, room_map, sec_map = _load_lookup_maps(
+        db, slot_subject_ids, slot_instructor_ids, slot_room_ids, slot_section_ids
+    )
+    section_rows = (
+        db.query(K12Section)
+        .filter(K12Section.class_id == class_id)
+        .order_by(K12Section.created_at.asc())
+        .all()
+    )
+    teacher_ids = {sec.class_teacher_id for sec in section_rows if sec.class_teacher_id}
+    if teacher_ids:
+        for tid, inst in (
+            (r.id, r) for r in db.query(Instructor).filter(Instructor.id.in_(teacher_ids)).all()
+        ):
+            inst_map[tid] = inst
     sections_out: list[SectionSetupItem] = []
-    for sec in db.query(K12Section).filter(K12Section.class_id == class_id).order_by(K12Section.created_at.asc()).all():
-        inst = (
-            db.query(Instructor).filter(Instructor.id == sec.class_teacher_id).first()
-            if sec.class_teacher_id
-            else None
-        )
+    for sec in section_rows:
+        inst = inst_map.get(sec.class_teacher_id) if sec.class_teacher_id else None
         sections_out.append(
             SectionSetupItem(
                 id=sec.id,
@@ -512,8 +698,21 @@ def get_class_setup(
         numeric_level=cls.numeric_level,
         academic_year_id=cls.academic_year_id,
         subjects=subjects,
-        timetable=[_timetable_slot_response(db, s) for s in slots],
+        timetable=[
+            _timetable_slot_response(
+                s,
+                cls=cls,
+                subjects=sub_map,
+                instructors=inst_map,
+                rooms=room_map,
+                sections=sec_map,
+            )
+            for s in slots
+        ],
+        timetable_settings=_timetable_settings_response(cls),
         sections=sections_out,
+        pass_threshold_percent=pass_pct,
+        grading_scale_name=scale.grading_scale_name if scale else None,
     )
 
 
@@ -541,7 +740,7 @@ def assign_class_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _get_class_or_404(class_id, db)
+    cls = _get_class_or_404(class_id, db)
     sub = db.query(K12Subject).filter(K12Subject.id == body.subject_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subject not found")
@@ -549,12 +748,13 @@ def assign_class_subject(
         K12ClassSubject.class_id == class_id, K12ClassSubject.subject_id == body.subject_id
     ).first():
         raise HTTPException(status_code=400, detail="Subject already assigned to this class")
+    pass_marks, _ = pass_marks_for_full(db, cls, body.full_marks)
     db.add(
         K12ClassSubject(
             class_id=class_id,
             subject_id=body.subject_id,
             full_marks=body.full_marks,
-            pass_marks=body.pass_marks,
+            pass_marks=pass_marks,
         )
     )
     db.commit()
@@ -563,7 +763,7 @@ def assign_class_subject(
         subject_name=sub.name,
         subject_code=sub.code,
         full_marks=body.full_marks,
-        pass_marks=body.pass_marks,
+        pass_marks=pass_marks,
         is_optional=sub.is_optional,
     )
 
@@ -584,9 +784,9 @@ def update_class_subject_marks(
     if not link:
         raise HTTPException(status_code=404, detail="Subject not assigned to this class")
     if body.full_marks is not None:
+        cls = _get_class_or_404(class_id, db)
         link.full_marks = body.full_marks
-    if body.pass_marks is not None:
-        link.pass_marks = body.pass_marks
+        link.pass_marks, _ = pass_marks_for_full(db, cls, link.full_marks)
     db.commit()
     sub = db.query(K12Subject).filter(K12Subject.id == subject_id).first()
     return ClassSubjectItem(
@@ -617,6 +817,27 @@ def remove_class_subject(
     db.commit()
 
 
+@router.patch("/classes/{class_id}/timetable-settings", response_model=TimetableSettingsResponse)
+def update_timetable_settings(
+    class_id: str,
+    body: TimetableSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cls = _get_class_or_404(class_id, db)
+    if body.break_after_period > body.periods_per_day:
+        raise HTTPException(status_code=400, detail="Break must fall within the school day periods")
+    cls.timetable_weekdays = weekdays_to_json(body.weekdays)
+    cls.timetable_periods_per_day = body.periods_per_day
+    cls.timetable_period_minutes = body.period_minutes
+    cls.timetable_break_minutes = body.break_minutes
+    cls.timetable_break_after_period = body.break_after_period
+    cls.timetable_start_time = body.start_time
+    db.commit()
+    db.refresh(cls)
+    return _timetable_settings_response(cls)
+
+
 @router.post("/classes/{class_id}/timetable", response_model=TimetableSlotResponse)
 def create_timetable_slot(
     class_id: str,
@@ -624,15 +845,44 @@ def create_timetable_slot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _get_class_or_404(class_id, db)
-    if body.from_time >= body.to_time:
-        raise HTTPException(status_code=400, detail="End time must be after start time")
+    cls = _get_class_or_404(class_id, db)
+    max_period = periods_per_day(cls) - 1
+    if body.period_index > max_period:
+        raise HTTPException(status_code=400, detail=f"Period must be between 0 and {max_period}")
+    weekdays = parse_weekdays(cls.timetable_weekdays)
+    if body.day_of_week not in weekdays:
+        raise HTTPException(status_code=400, detail="This day is not a school day for this class")
     if not db.query(K12Subject).filter(K12Subject.id == body.subject_id).first():
         raise HTTPException(status_code=404, detail="Subject not found")
+    assigned = db.query(K12ClassSubject).filter(
+        K12ClassSubject.class_id == class_id, K12ClassSubject.subject_id == body.subject_id
+    ).first()
+    if not assigned:
+        raise HTTPException(status_code=400, detail="Subject is not assigned to this class")
     if body.section_id and not db.query(K12Section).filter(
         K12Section.id == body.section_id, K12Section.class_id == class_id
     ).first():
         raise HTTPException(status_code=400, detail="Invalid section for this class")
+    from_t, to_t = period_times(cls, body.period_index)
+    existing = (
+        db.query(K12TimetableSlot)
+        .filter(
+            K12TimetableSlot.class_id == class_id,
+            K12TimetableSlot.day_of_week == body.day_of_week,
+            K12TimetableSlot.period_index == body.period_index,
+        )
+        .first()
+    )
+    if existing:
+        existing.subject_id = body.subject_id
+        existing.section_id = body.section_id
+        existing.instructor_id = body.instructor_id
+        existing.room_id = body.room_id
+        existing.from_time = from_t
+        existing.to_time = to_t
+        db.commit()
+        db.refresh(existing)
+        return _timetable_slot_response_db(db, existing)
     row = K12TimetableSlot(
         id=new_id("TT"),
         class_id=class_id,
@@ -641,13 +891,14 @@ def create_timetable_slot(
         instructor_id=body.instructor_id,
         room_id=body.room_id,
         day_of_week=body.day_of_week,
-        from_time=body.from_time,
-        to_time=body.to_time,
+        period_index=body.period_index,
+        from_time=from_t,
+        to_time=to_t,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _timetable_slot_response(db, row)
+    return _timetable_slot_response_db(db, row)
 
 
 @router.delete("/timetable/{slot_id}", status_code=204)
@@ -668,12 +919,11 @@ def assign_subject_legacy(
     class_id: str,
     subject_id: str,
     full_marks: int = 100,
-    pass_marks: int = 40,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Legacy query-param assign; prefer POST /classes/{class_id}/subjects."""
-    body = ClassSubjectAssign(subject_id=subject_id, full_marks=full_marks, pass_marks=pass_marks)
+    body = ClassSubjectAssign(subject_id=subject_id, full_marks=full_marks)
     return assign_class_subject(class_id, body, db, current_user)
 
 

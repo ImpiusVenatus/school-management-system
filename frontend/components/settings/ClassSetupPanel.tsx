@@ -5,10 +5,18 @@ import Link from "next/link";
 import { Modal } from "@/components/ui/Modal";
 import { SelectField } from "@/components/ui/SelectField";
 import { api } from "@/lib/api";
+import { cachedGet } from "@/lib/settings-cache";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
+import { computePassMarks } from "@/lib/k12-class";
+import {
+  cellKey,
+  DEFAULT_TIMETABLE_SETTINGS,
+  periodTimeRange,
+  WEEKDAY_LABELS,
+  type TimetableSettings,
+} from "@/lib/timetable";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass } from "@/lib/ui";
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 type SubjectItem = {
   subject_id: string;
@@ -22,13 +30,18 @@ type SubjectItem = {
 type TimetableSlot = {
   id: string;
   day_of_week: number;
+  period_index: number;
   from_time: string;
   to_time: string;
+  subject_id: string;
   subject_name: string;
   subject_code: string;
   section_name: string | null;
   instructor_name: string | null;
   room_name: string | null;
+  section_id: string | null;
+  instructor_id: string | null;
+  room_id: string | null;
 };
 
 type SectionSetup = {
@@ -46,16 +59,17 @@ type ClassSetup = {
   academic_year_id: string;
   subjects: SubjectItem[];
   timetable: TimetableSlot[];
+  timetable_settings: TimetableSettings;
   sections: SectionSetup[];
+  pass_threshold_percent?: number;
+  grading_scale_name?: string | null;
 };
 
 type K12Subject = { id: string; name: string; code: string };
 type Instructor = { id: string; instructor_name: string };
 type Room = { id: string; room_name: string };
 
-function fmtTime(t: string) {
-  return t?.slice(0, 5) ?? "";
-}
+const ALL_WEEKDAYS = WEEKDAY_LABELS.map((label, i) => ({ value: i, label }));
 
 export function ClassSetupPanel({
   token,
@@ -82,33 +96,40 @@ export function ClassSetupPanel({
 
   const [addSubjectId, setAddSubjectId] = useState("");
   const [addFullMarks, setAddFullMarks] = useState("100");
-  const [addPassMarks, setAddPassMarks] = useState("40");
+
+  const [editName, setEditName] = useState(className);
+  const [editLevel, setEditLevel] = useState("");
+  const [ttWeekdays, setTtWeekdays] = useState<number[]>(DEFAULT_TIMETABLE_SETTINGS.weekdays);
+  const [ttPeriods, setTtPeriods] = useState(String(DEFAULT_TIMETABLE_SETTINGS.periods_per_day));
+  const [ttPeriodMins, setTtPeriodMins] = useState(String(DEFAULT_TIMETABLE_SETTINGS.period_minutes));
+  const [ttBreakMins, setTtBreakMins] = useState(String(DEFAULT_TIMETABLE_SETTINGS.break_minutes));
+  const [ttBreakAfter, setTtBreakAfter] = useState(String(DEFAULT_TIMETABLE_SETTINGS.break_after_period));
+  const [ttStart, setTtStart] = useState("08:00");
 
   const [slotModal, setSlotModal] = useState(false);
-  const [slotDay, setSlotDay] = useState("0");
-  const [slotFrom, setSlotFrom] = useState("09:00");
-  const [slotTo, setSlotTo] = useState("09:45");
+  const [assignDay, setAssignDay] = useState(0);
+  const [assignPeriod, setAssignPeriod] = useState(0);
+  const [assignSlotId, setAssignSlotId] = useState<string | null>(null);
   const [slotSubjectId, setSlotSubjectId] = useState("");
   const [slotSectionId, setSlotSectionId] = useState("");
   const [slotInstructorId, setSlotInstructorId] = useState("");
   const [slotRoomId, setSlotRoomId] = useState("");
 
-  const [editName, setEditName] = useState(className);
-  const [editLevel, setEditLevel] = useState("");
-
   const load = useCallback(async () => {
     setLoading(true);
+    setAllSubjects([]);
     try {
-      const [data, subs, inst, rms] = await Promise.all([
+      const [data, inst, rms] = await Promise.all([
         api<ClassSetup>(`/api/k12/classes/${classId}/setup`, { token: token ?? undefined }),
-        api<K12Subject[]>("/api/k12/subjects", { token: token ?? undefined }),
-        api<Instructor[]>("/api/instructors?limit=200", { token: token ?? undefined }).catch(() => []),
-        api<Room[]>("/api/rooms", { token: token ?? undefined }).catch(() => []),
+        cachedGet<Instructor[]>("/api/instructors?limit=200", { token: token ?? undefined }).catch(
+          () => [] as Instructor[]
+        ),
+        cachedGet<Room[]>("/api/rooms", { token: token ?? undefined }).catch(() => [] as Room[]),
       ]);
       setSetup(data);
       setEditName(data.name);
       setEditLevel(data.numeric_level != null ? String(data.numeric_level) : "");
-      setAllSubjects(subs);
+      applyTimetableSettingsToForm(data.timetable_settings);
       setInstructors(inst.filter((i) => i.instructor_name));
       setRooms(rms);
     } catch {
@@ -119,9 +140,35 @@ export function ClassSetupPanel({
     }
   }, [classId, token]);
 
+  function applyTimetableSettingsToForm(ts: TimetableSettings) {
+    setTtWeekdays(ts.weekdays);
+    setTtPeriods(String(ts.periods_per_day));
+    setTtPeriodMins(String(ts.period_minutes));
+    setTtBreakMins(String(ts.break_minutes));
+    setTtBreakAfter(String(ts.break_after_period));
+    const st = ts.start_time?.slice(0, 5) ?? "08:00";
+    setTtStart(st);
+  }
+
+  const loadSubjectOptions = useCallback(async () => {
+    if (allSubjects.length > 0) return;
+    try {
+      const subs = await cachedGet<K12Subject[]>("/api/k12/subjects/options", {
+        token: token ?? undefined,
+      });
+      setAllSubjects(subs);
+    } catch {
+      snackbarRef.current.error("Could not load subjects list");
+    }
+  }, [allSubjects.length, token]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (panel === "subjects") loadSubjectOptions();
+  }, [panel, loadSubjectOptions]);
 
   const unassignedSubjects = useMemo(() => {
     if (!setup) return allSubjects;
@@ -129,16 +176,29 @@ export function ClassSetupPanel({
     return allSubjects.filter((s) => !assigned.has(s.id));
   }, [allSubjects, setup]);
 
-  const slotsByDay = useMemo(() => {
-    const map: TimetableSlot[][] = DAYS.map(() => []);
+  const passThresholdPercent = setup?.pass_threshold_percent ?? 40;
+  const ttSettings = setup?.timetable_settings ?? DEFAULT_TIMETABLE_SETTINGS;
+
+  const previewPassMarks = useMemo(
+    () => computePassMarks(parseInt(addFullMarks, 10) || 0, passThresholdPercent),
+    [addFullMarks, passThresholdPercent]
+  );
+
+  const slotMap = useMemo(() => {
+    const map = new Map<string, TimetableSlot>();
     if (!setup) return map;
     for (const slot of setup.timetable) {
-      if (slot.day_of_week >= 0 && slot.day_of_week < 7) {
-        map[slot.day_of_week].push(slot);
-      }
+      map.set(cellKey(slot.day_of_week, slot.period_index), slot);
     }
     return map;
   }, [setup]);
+
+  const activeWeekdays = useMemo(
+    () => [...ttSettings.weekdays].sort((a, b) => a - b),
+    [ttSettings.weekdays]
+  );
+
+  const periodCount = ttSettings.periods_per_day;
 
   async function assignSubject(e: React.FormEvent) {
     e.preventDefault();
@@ -151,7 +211,6 @@ export function ClassSetupPanel({
         body: JSON.stringify({
           subject_id: addSubjectId,
           full_marks: parseInt(addFullMarks, 10) || 100,
-          pass_marks: parseInt(addPassMarks, 10) || 40,
         }),
       });
       setSetup((s) => (s ? { ...s, subjects: [...s.subjects, item] } : s));
@@ -177,7 +236,19 @@ export function ClassSetupPanel({
     }
   }
 
-  async function addSlot(e: React.FormEvent) {
+  function openAssignCell(day: number, period: number) {
+    const existing = slotMap.get(cellKey(day, period));
+    setAssignDay(day);
+    setAssignPeriod(period);
+    setAssignSlotId(existing?.id ?? null);
+    setSlotSubjectId(existing?.subject_id ?? setup?.subjects[0]?.subject_id ?? "");
+    setSlotSectionId(existing?.section_id ?? "");
+    setSlotInstructorId(existing?.instructor_id ?? "");
+    setSlotRoomId(existing?.room_id ?? "");
+    setSlotModal(true);
+  }
+
+  async function saveSlot(e: React.FormEvent) {
     e.preventDefault();
     if (!slotSubjectId) return;
     setSaving(true);
@@ -190,28 +261,43 @@ export function ClassSetupPanel({
           section_id: slotSectionId || null,
           instructor_id: slotInstructorId || null,
           room_id: slotRoomId || null,
-          day_of_week: parseInt(slotDay, 10),
-          from_time: slotFrom,
-          to_time: slotTo,
+          day_of_week: assignDay,
+          period_index: assignPeriod,
         }),
       });
-      setSetup((s) => (s ? { ...s, timetable: [...s.timetable, slot] } : s));
+      const key = cellKey(assignDay, assignPeriod);
+      setSetup((s) => {
+        if (!s) return s;
+        const rest = s.timetable.filter((x) => cellKey(x.day_of_week, x.period_index) !== key);
+        return { ...s, timetable: [...rest, slot] };
+      });
       setSlotModal(false);
-      snackbarRef.current.success("Period added.");
+      snackbarRef.current.success("Period saved.");
     } catch (err) {
-      snackbarRef.current.error(err instanceof Error ? err.message : "Failed to add period");
+      snackbarRef.current.error(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteSlot(slotId: string) {
+  async function clearSlot() {
+    if (!assignSlotId) {
+      setSlotModal(false);
+      return;
+    }
+    setSaving(true);
     try {
-      await api(`/api/k12/timetable/${slotId}`, { token: token ?? undefined, method: "DELETE" });
-      setSetup((s) => (s ? { ...s, timetable: s.timetable.filter((x) => x.id !== slotId) } : s));
-      snackbarRef.current.success("Period removed.");
+      await api(`/api/k12/timetable/${assignSlotId}`, { token: token ?? undefined, method: "DELETE" });
+      const key = cellKey(assignDay, assignPeriod);
+      setSetup((s) =>
+        s ? { ...s, timetable: s.timetable.filter((x) => cellKey(x.day_of_week, x.period_index) !== key) } : s
+      );
+      setSlotModal(false);
+      snackbarRef.current.success("Period cleared.");
     } catch (err) {
-      snackbarRef.current.error(err instanceof Error ? err.message : "Failed to delete");
+      snackbarRef.current.error(err instanceof Error ? err.message : "Failed to clear");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -236,6 +322,44 @@ export function ClassSetupPanel({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveTimetableSettings(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const periods = Math.min(12, Math.max(1, parseInt(ttPeriods, 10) || 8));
+      const breakAfter = parseInt(ttBreakAfter, 10) || 0;
+      if (breakAfter > periods) {
+        snackbarRef.current.error("Break must be before the last period of the day.");
+        return;
+      }
+      const updated = await api<TimetableSettings>(`/api/k12/classes/${classId}/timetable-settings`, {
+        token: token ?? undefined,
+        method: "PATCH",
+        body: JSON.stringify({
+          weekdays: ttWeekdays,
+          periods_per_day: periods,
+          period_minutes: parseInt(ttPeriodMins, 10) || 45,
+          break_minutes: parseInt(ttBreakMins, 10) || 0,
+          break_after_period: breakAfter,
+          start_time: `${ttStart}:00`,
+        }),
+      });
+      setSetup((s) => (s ? { ...s, timetable_settings: updated } : s));
+      applyTimetableSettingsToForm(updated);
+      snackbarRef.current.success("Timetable layout saved.");
+    } catch (err) {
+      snackbarRef.current.error(err instanceof Error ? err.message : "Failed to save timetable layout");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleWeekday(day: number) {
+    setTtWeekdays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort((a, b) => a - b)
+    );
   }
 
   async function saveSectionTeacher(sectionId: string, teacherId: string) {
@@ -269,7 +393,7 @@ export function ClassSetupPanel({
   }
 
   if (loading) {
-    return <p className="text-sm text-[var(--muted)] py-4">Loading class setup…</p>;
+    return <PageLoader minHeight="min-h-[12rem]" />;
   }
   if (!setup) {
     return <p className="text-sm text-[var(--muted)] py-4">Could not load class details.</p>;
@@ -311,7 +435,7 @@ export function ClassSetupPanel({
                       <span className="text-[var(--muted)] font-normal">({s.subject_code})</span>
                     </p>
                     <p className="text-[11px] text-[var(--muted)]">
-                      Full {s.full_marks} · Pass {s.pass_marks}
+                      Full {s.full_marks} · Pass {s.pass_marks} ({passThresholdPercent}%)
                       {s.is_optional ? " · Optional" : ""}
                     </p>
                   </div>
@@ -334,7 +458,10 @@ export function ClassSetupPanel({
               </Link>
             </p>
           ) : (
-            <form onSubmit={assignSubject} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-neutral-50/80 border border-[var(--border)]">
+            <form
+              onSubmit={assignSubject}
+              className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-neutral-50/80 border border-[var(--border)]"
+            >
               <SelectField
                 label="Add subject"
                 options={unassignedSubjects.map((s) => ({ value: s.id, label: `${s.name} (${s.code})` }))}
@@ -343,12 +470,20 @@ export function ClassSetupPanel({
                 className="min-w-[12rem] flex-1"
               />
               <div>
-                <label className="block text-xs font-medium mb-1">Full</label>
-                <input type="number" value={addFullMarks} onChange={(e) => setAddFullMarks(e.target.value)} className={`${inputClass} w-20`} />
+                <label className="block text-xs font-medium mb-1">Full marks</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={addFullMarks}
+                  onChange={(e) => setAddFullMarks(e.target.value)}
+                  className={`${inputClass} w-24`}
+                />
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Pass</label>
-                <input type="number" value={addPassMarks} onChange={(e) => setAddPassMarks(e.target.value)} className={`${inputClass} w-20`} />
+              <div className="pb-2">
+                <p className="text-xs text-[var(--muted)]">
+                  Pass <span className="font-semibold text-[var(--foreground)] tabular-nums">{previewPassMarks}</span>
+                  <span className="text-[var(--muted)]"> ({passThresholdPercent}%)</span>
+                </p>
               </div>
               <button type="submit" disabled={saving || !addSubjectId} className={btnPrimary}>
                 Assign
@@ -360,69 +495,97 @@ export function ClassSetupPanel({
 
       {panel === "timetable" && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center gap-2">
-            <p className="text-sm text-[var(--muted)]">Weekly periods for {setup.name}</p>
-            <button
-              type="button"
-              className={btnSecondary}
-              disabled={setup.subjects.length === 0}
-              onClick={() => {
-                setSlotSubjectId(setup.subjects[0]?.subject_id ?? "");
-                setSlotModal(true);
-              }}
-            >
-              + Add period
-            </button>
-          </div>
-          {setup.subjects.length === 0 && (
+          {setup.subjects.length === 0 ? (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Assign subjects first, then build the timetable.
+              Assign subjects first, then fill the weekly timetable.
             </p>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {DAYS.map((day, di) => (
-              <div key={day} className="rounded-lg border border-[var(--border)] p-3 min-h-[6rem]">
-                <p className="text-xs font-semibold text-[var(--muted)] mb-2">{day}</p>
-                {slotsByDay[di].length === 0 ? (
-                  <p className="text-[11px] text-[var(--muted)]">—</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {slotsByDay[di].map((slot) => (
-                      <li key={slot.id} className="text-xs rounded-md bg-white border border-[var(--border)] px-2 py-1.5">
-                        <div className="flex justify-between gap-1">
-                          <span className="font-medium">
-                            {fmtTime(slot.from_time)}–{fmtTime(slot.to_time)}
+          ) : activeWeekdays.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              Choose school days under Class settings → Timetable layout, then return here.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+              <table className="w-full text-sm border-collapse min-w-[32rem]">
+                <thead>
+                  <tr className="bg-neutral-50/90 border-b border-[var(--border)]">
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-[var(--muted)] w-16 sticky left-0 bg-neutral-50/90">
+                      Day
+                    </th>
+                    {Array.from({ length: periodCount }, (_, p) => {
+                      const range = periodTimeRange(ttSettings, p);
+                      return (
+                        <th key={p} className="px-1 py-2 text-center min-w-[5.5rem]">
+                          <span className="block text-[10px] font-semibold text-[var(--foreground)]">P{p + 1}</span>
+                          <span className="block text-[9px] text-[var(--muted)] font-normal">
+                            {range.from}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => deleteSlot(slot.id)}
-                            className="cursor-pointer text-red-600 hover:underline"
-                          >
-                            ×
-                          </button>
-                        </div>
-                        <p>{slot.subject_name}</p>
-                        {(slot.section_name || slot.instructor_name || slot.room_name) && (
-                          <p className="text-[var(--muted)]">
-                            {[slot.section_name, slot.instructor_name, slot.room_name].filter(Boolean).join(" · ")}
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeWeekdays.map((day) => (
+                    <tr key={day} className="border-b border-[var(--border)] last:border-0">
+                      <td className="px-3 py-2 text-xs font-semibold text-[var(--muted)] sticky left-0 bg-white">
+                        {WEEKDAY_LABELS[day]}
+                      </td>
+                      {Array.from({ length: periodCount }, (_, period) => {
+                        const slot = slotMap.get(cellKey(day, period));
+                        return (
+                          <td key={period} className="p-1">
+                            <button
+                              type="button"
+                              onClick={() => openAssignCell(day, period)}
+                              className={`w-full min-h-[3.25rem] rounded-md border text-left px-2 py-1.5 transition-colors cursor-pointer ${
+                                slot
+                                  ? "border-[var(--primary)]/30 bg-[var(--primary-light)] hover:bg-[var(--primary-light)]"
+                                  : "border-dashed border-[var(--border)] bg-white hover:bg-neutral-50 hover:border-[var(--primary)]/40"
+                              }`}
+                            >
+                              {slot ? (
+                                <>
+                                  <p className="text-xs font-semibold leading-tight truncate">{slot.subject_name}</p>
+                                  <p className="text-[10px] text-[var(--muted)] truncate">{slot.subject_code}</p>
+                                </>
+                              ) : (
+                                <span className="text-[10px] text-[var(--muted)]">+</span>
+                              )}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs text-[var(--muted)]">
+            Click a cell to assign or change a subject for that period.
+            {ttSettings.break_after_period > 0 && ttSettings.break_minutes > 0 && (
+              <>
+                {" "}
+                Break: {ttSettings.break_minutes} min after period {ttSettings.break_after_period}.
+              </>
+            )}
+          </p>
         </div>
       )}
 
       {panel === "settings" && (
-        <div className="space-y-6">
+        <div className="space-y-8">
           <form onSubmit={saveClassSettings} className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <h4 className="sm:col-span-2 text-sm font-semibold">Class details</h4>
             <div>
               <label className="block text-sm font-medium mb-1">Class name</label>
-              <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} required />
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className={inputClass}
+                required
+              />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Grade level (optional)</label>
@@ -442,7 +605,94 @@ export function ClassSetupPanel({
               </button>
             </div>
           </form>
-          <div>
+
+          <form onSubmit={saveTimetableSettings} className="max-w-2xl space-y-4 border-t border-[var(--border)] pt-6">
+            <div>
+              <h4 className="text-sm font-semibold">Timetable layout</h4>
+              <p className="text-xs text-[var(--muted)] mt-1">
+                Set the school week and periods. The timetable tab uses this to build the weekly grid.
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-medium mb-2">School days</p>
+              <div className="flex flex-wrap gap-2">
+                {ALL_WEEKDAYS.map(({ value, label }) => (
+                  <label
+                    key={value}
+                    className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full border cursor-pointer ${
+                      ttWeekdays.includes(value)
+                        ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                        : "border-[var(--border)] text-[var(--muted)]"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={ttWeekdays.includes(value)}
+                      onChange={() => toggleWeekday(value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Periods per day</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={ttPeriods}
+                  onChange={(e) => setTtPeriods(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Minutes per period</label>
+                <input
+                  type="number"
+                  min={15}
+                  max={120}
+                  value={ttPeriodMins}
+                  onChange={(e) => setTtPeriodMins(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Day starts at</label>
+                <input type="time" value={ttStart} onChange={(e) => setTtStart(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Break length (min)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={90}
+                  value={ttBreakMins}
+                  onChange={(e) => setTtBreakMins(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Break after period</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={ttBreakAfter}
+                  onChange={(e) => setTtBreakAfter(e.target.value)}
+                  className={inputClass}
+                  placeholder="0 = no break"
+                />
+              </div>
+            </div>
+            <button type="submit" disabled={saving || ttWeekdays.length === 0} className={btnPrimary}>
+              {saving ? "Saving…" : "Save timetable layout"}
+            </button>
+          </form>
+
+          <div className="border-t border-[var(--border)] pt-6">
             <h4 className="text-sm font-semibold mb-2">Section class teachers</h4>
             {setup.sections.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">Add sections to assign class teachers.</p>
@@ -469,24 +719,16 @@ export function ClassSetupPanel({
         </div>
       )}
 
-      <Modal open={slotModal} onClose={() => !saving && setSlotModal(false)} title="Add period" size="md">
-        <form onSubmit={addSlot} className="space-y-3">
-          <SelectField
-            label="Day"
-            options={DAYS.map((d, i) => ({ value: String(i), label: d }))}
-            value={slotDay}
-            onChange={setSlotDay}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">From</label>
-              <input type="time" value={slotFrom} onChange={(e) => setSlotFrom(e.target.value)} className={inputClass} required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">To</label>
-              <input type="time" value={slotTo} onChange={(e) => setSlotTo(e.target.value)} className={inputClass} required />
-            </div>
-          </div>
+      <Modal
+        open={slotModal}
+        onClose={() => !saving && setSlotModal(false)}
+        title={`${WEEKDAY_LABELS[assignDay]} · Period ${assignPeriod + 1}`}
+        size="md"
+      >
+        <form onSubmit={saveSlot} className="space-y-3">
+          <p className="text-xs text-[var(--muted)]">
+            {periodTimeRange(ttSettings, assignPeriod).from} – {periodTimeRange(ttSettings, assignPeriod).to}
+          </p>
           <SelectField
             label="Subject"
             options={setup.subjects.map((s) => ({
@@ -523,13 +765,22 @@ export function ClassSetupPanel({
             value={slotRoomId}
             onChange={setSlotRoomId}
           />
-          <div className="flex gap-2 justify-end pt-2">
-            <button type="button" onClick={() => setSlotModal(false)} className={btnSecondary} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" disabled={saving || !slotSubjectId} className={btnPrimary}>
-              {saving ? "Adding…" : "Add period"}
-            </button>
+          <div className="flex flex-wrap gap-2 justify-between pt-2">
+            {assignSlotId ? (
+              <button type="button" onClick={clearSlot} className="text-sm text-red-700 hover:underline" disabled={saving}>
+                Clear period
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSlotModal(false)} className={btnSecondary} disabled={saving}>
+                Cancel
+              </button>
+              <button type="submit" disabled={saving || !slotSubjectId} className={btnPrimary}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>

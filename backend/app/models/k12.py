@@ -14,6 +14,12 @@ class K12Class(Base):
     name = Column(String(50), nullable=False)
     numeric_level = Column(Integer, nullable=True)
     grading_scale_id = Column(String, ForeignKey("grading_scales.id", ondelete="SET NULL"), nullable=True)
+    timetable_weekdays = Column(String(32), nullable=True)  # JSON array 0=Mon … 6=Sun
+    timetable_periods_per_day = Column(Integer, nullable=True)
+    timetable_period_minutes = Column(Integer, nullable=True)
+    timetable_break_minutes = Column(Integer, nullable=True)
+    timetable_break_after_period = Column(Integer, nullable=True)
+    timetable_start_time = Column(Time, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -93,6 +99,7 @@ class K12TimetableSlot(Base):
     instructor_id = Column(String, ForeignKey("instructors.id", ondelete="SET NULL"), nullable=True)
     room_id = Column(String, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
     day_of_week = Column(Integer, nullable=False)  # 0=Monday … 6=Sunday
+    period_index = Column(Integer, nullable=True)  # 0-based period in the day grid
     from_time = Column(Time, nullable=False)
     to_time = Column(Time, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
