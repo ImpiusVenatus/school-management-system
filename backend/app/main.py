@@ -13,7 +13,8 @@ from app.api import auth, students, programs, courses, enrollment, academic, aca
 from app.api import student_groups, course_schedule, attendance, leave, fees, assessment
 from app.api import instructors, rooms, guardians, applicants, files, setup, clubs, notices
 from app.api import settings as settings_api
-from app.api import k12, invoices, rbac
+from app.api import k12, invoices, rbac, audit
+from app.middleware.audit import AuditMiddleware
 
 config = get_settings()
 
@@ -50,6 +51,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditMiddleware)
 
 # API prefix /api
 api_prefix = "/api"
@@ -78,6 +80,7 @@ app.include_router(notices.router, prefix=api_prefix)
 app.include_router(k12.router, prefix=api_prefix)
 app.include_router(invoices.router, prefix=api_prefix)
 app.include_router(rbac.router, prefix=api_prefix)
+app.include_router(audit.router, prefix=api_prefix)
 
 
 @app.get("/")

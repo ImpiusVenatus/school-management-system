@@ -46,6 +46,7 @@ from app.models.k12 import (
     K12TimetableSlot,
 )
 from app.models.invoice import Invoice, InvoiceItem, Payment
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "Base",
@@ -111,4 +112,5 @@ __all__ = [
     "Invoice",
     "InvoiceItem",
     "Payment",
+    "AuditLog",
 ]

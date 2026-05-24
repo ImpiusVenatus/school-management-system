@@ -1,7 +1,7 @@
 """In-house auth: login, refresh, logout, register, me."""
 import uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -17,6 +17,7 @@ from app.core.security import (
 from app.core.auth import get_current_user
 from app.core.permissions import get_user_permission_codes
 from app.config import get_settings
+from app.services.audit import record_audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -57,14 +58,59 @@ def _issue_tokens(db: Session, user: User) -> Token:
     return Token(access_token=access, refresh_token=refresh_value)
 
 
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
 @router.post("/login", response_model=Token)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.email == form.username).first()
     if not user or not verify_password(form.password, user.hashed_password):
+        try:
+            record_audit(
+                db,
+                action="auth.login_failed",
+                category="security",
+                actor_name=form.username,
+                actor_role="—",
+                resource_label="Sign in",
+                http_method="POST",
+                path="/api/auth/login",
+                status_code=401,
+                ip_address=_client_ip(request),
+                user_agent=request.headers.get("user-agent"),
+            )
+        except Exception:
+            db.rollback()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
-    return _issue_tokens(db, user)
+    tokens = _issue_tokens(db, user)
+    try:
+        record_audit(
+            db,
+            action="auth.login",
+            category="auth",
+            user=user,
+            resource_label="Sign in",
+            http_method="POST",
+            path="/api/auth/login",
+            status_code=200,
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+    except Exception:
+        db.rollback()
+    return tokens
 
 
 @router.post("/refresh", response_model=Token)
