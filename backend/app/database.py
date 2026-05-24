@@ -1,6 +1,5 @@
 """Database session and engine (PostgreSQL/Neon)."""
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import get_settings
@@ -30,40 +29,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-def _connection_is_stale(exc: BaseException) -> bool:
-    msg = f"{exc} {getattr(exc, '__cause__', '')}".lower()
-    return any(
-        phrase in msg
-        for phrase in (
-            "ssl connection has been closed",
-            "connection has been closed",
-            "server closed the connection",
-            "connection reset",
-            "broken pipe",
-            "terminating connection",
-            "could not connect",
-            "connection refused",
-        )
-    )
-
-
-def _warm_connection(db) -> None:
-    db.execute(text("SELECT 1"))
-
-
 def get_db():
-    """Dependency for FastAPI: yield a DB session, reconnecting if the pool handed out a dead connection."""
+    """Dependency for FastAPI: yield a DB session (pool_pre_ping handles stale connections)."""
     db = SessionLocal()
     try:
-        try:
-            _warm_connection(db)
-        except (OperationalError, DBAPIError) as exc:
-            if not _connection_is_stale(exc):
-                raise
-            db.rollback()
-            db.close()
-            db = SessionLocal()
-            _warm_connection(db)
         yield db
     except Exception:
         db.rollback()

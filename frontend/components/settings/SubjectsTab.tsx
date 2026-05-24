@@ -8,6 +8,8 @@ import { SelectField } from "@/components/ui/SelectField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import { api } from "@/lib/api";
+import { cachedGet, invalidateSettingsCache } from "@/lib/settings-cache";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass, labelClass } from "@/lib/ui";
 
@@ -78,17 +80,17 @@ export function SubjectsTab({
     setLoading(true);
     try {
       if (schoolType === "k12") {
-        const [rows, depts] = await Promise.all([
-          api<K12Subject[]>("/api/k12/subjects", { token: token ?? undefined }),
-          api<Department[]>("/api/academic/departments", { token: token ?? undefined }),
-        ]);
-        setK12Subjects(rows);
-        setDepartments(depts);
+        const data = await cachedGet<{ subjects: K12Subject[]; departments: Department[] }>(
+          "/api/k12/subjects-page",
+          { token: token ?? undefined }
+        );
+        setK12Subjects(data.subjects);
+        setDepartments(data.departments);
         setCourses([]);
       } else {
-        const rows = await api<ProgramCourse[]>("/api/courses?limit=200", { token: token ?? undefined }).catch(
-          () => [] as ProgramCourse[]
-        );
+        const rows = await cachedGet<ProgramCourse[]>("/api/courses?limit=200", {
+          token: token ?? undefined,
+        }).catch(() => [] as ProgramCourse[]);
         setCourses(rows);
         setK12Subjects([]);
         setDepartments([]);
@@ -211,6 +213,8 @@ export function SubjectsTab({
             body: JSON.stringify(payload),
           });
           setK12Subjects((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+          invalidateSettingsCache("/api/k12/subjects-page");
+          invalidateSettingsCache("/api/academic/departments");
           snackbar.success("Subject updated.");
         } else {
           const created = await api<K12Subject>("/api/k12/subjects", {
@@ -219,6 +223,8 @@ export function SubjectsTab({
             body: JSON.stringify(payload),
           });
           setK12Subjects((prev) => [...prev, created]);
+          invalidateSettingsCache("/api/k12/subjects-page");
+          invalidateSettingsCache("/api/academic/departments");
           snackbar.success("Subject added.");
         }
       } else {
@@ -247,6 +253,8 @@ export function SubjectsTab({
     try {
       await api(`/api/k12/subjects/${s.id}`, { token: token ?? undefined, method: "DELETE" });
       setK12Subjects((prev) => prev.filter((x) => x.id !== s.id));
+      invalidateSettingsCache("/api/k12/subjects-page");
+      invalidateSettingsCache("/api/academic/departments");
       snackbar.success("Subject deleted.");
     } catch (err) {
       snackbar.error(err instanceof Error ? err.message : "Cannot delete subject");
@@ -332,7 +340,7 @@ export function SubjectsTab({
 
       <Card className="p-0 overflow-hidden">
         {loading ? (
-          <p className="p-6 text-sm text-[var(--muted)]">Loading…</p>
+          <PageLoader minHeight="min-h-[12rem]" />
         ) : filtered.length === 0 ? (
           <p className="p-6 text-sm text-[var(--muted)]">No subjects yet. Add your first subject.</p>
         ) : schoolType === "k12" ? (

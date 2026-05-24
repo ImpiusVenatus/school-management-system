@@ -10,6 +10,7 @@ import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import { btnPrimary, btnSecondary, inputClass } from "@/lib/ui";
 import { ClassSetupPanel } from "@/components/settings/ClassSetupPanel";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 
 type YearOption = { id: string; academic_year_name: string; is_active: boolean };
 
@@ -77,11 +78,13 @@ export function ClassesSectionsTab({
   schoolType,
   activeYearId,
   years,
+  isActive = true,
 }: {
   token?: string | null;
   schoolType: string;
   activeYearId: string | null;
   years: YearOption[];
+  isActive?: boolean;
 }) {
   const snackbar = useSnackbar();
   const [viewYearId, setViewYearId] = useState("");
@@ -167,7 +170,9 @@ export function ClassesSectionsTab({
         if (data === null) return;
         applyStructure(data);
         hasLoadedRef.current = true;
+        prevFetchKeyRef.current = `${yearId}:${schoolType}`;
       } catch {
+        prevFetchKeyRef.current = "";
         snackbarRef.current.error("Could not load classes");
       } finally {
         setInitialLoading(false);
@@ -178,13 +183,14 @@ export function ClassesSectionsTab({
 
   const prevFetchKeyRef = useRef("");
   useEffect(() => {
-    if (!viewYearId) return;
+    if (!isActive || !viewYearId) return;
     const key = `${viewYearId}:${schoolType}`;
-    if (prevFetchKeyRef.current === key) return;
-    prevFetchKeyRef.current = key;
-    hasLoadedRef.current = false;
+    if (prevFetchKeyRef.current === key && hasLoadedRef.current) return;
+    if (prevFetchKeyRef.current !== key) {
+      hasLoadedRef.current = false;
+    }
     load({ reset: true });
-  }, [viewYearId, schoolType, load]);
+  }, [viewYearId, schoolType, load, isActive]);
 
   const viewYear = years.find((y) => y.id === viewYearId);
   const isViewingActive = viewYearId === activeYearId;
@@ -438,7 +444,7 @@ export function ClassesSectionsTab({
       )}
 
       {gridLoading ? (
-        <p className="text-sm text-[var(--muted)]">Loading…</p>
+        <PageLoader minHeight="min-h-[16rem]" />
       ) : schoolType === "k12" ? (
         k12Classes.length === 0 ? (
           <Card>

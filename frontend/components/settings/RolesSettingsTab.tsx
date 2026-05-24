@@ -8,9 +8,11 @@ import { SelectField } from "@/components/ui/SelectField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import { api, getApiUrl } from "@/lib/api";
+import { cachedGet } from "@/lib/settings-cache";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass, labelClass } from "@/lib/ui";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 
 type Permission = {
   id: string;
@@ -134,8 +136,8 @@ export function RolesSettingsTab({ token }: { token?: string | null }) {
     setLoading(true);
     try {
       const [p, r] = await Promise.all([
-        api<Permission[]>("/api/rbac/permissions", opts),
-        api<Role[]>("/api/rbac/roles", opts),
+        cachedGet<Permission[]>("/api/rbac/permissions", opts),
+        cachedGet<Role[]>("/api/rbac/roles", opts),
       ]);
       setPermissions(p);
       setRoles(r);
@@ -435,7 +437,7 @@ export function RolesSettingsTab({ token }: { token?: string | null }) {
       />
 
       {loading ? (
-        <p className="text-sm text-[var(--muted)]">Loading…</p>
+        <PageLoader minHeight="min-h-[20rem]" />
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-6">
           <Card className="p-0 overflow-hidden h-fit border border-[var(--border)] shadow-sm">

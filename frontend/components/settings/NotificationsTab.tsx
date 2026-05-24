@@ -7,6 +7,7 @@ import { TAB_META } from "@/components/settings/settings-nav";
 import { api } from "@/lib/api";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary } from "@/lib/ui";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 
 type Channel = { enabled: boolean; label: string; provider?: string };
 type EventRow = {
@@ -97,7 +98,7 @@ export function NotificationsTab({ token }: { token?: string | null }) {
       />
 
       {loading || !config ? (
-        <p className="text-sm text-[var(--muted)]">Loading…</p>
+        <PageLoader minHeight="min-h-[12rem]" />
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">

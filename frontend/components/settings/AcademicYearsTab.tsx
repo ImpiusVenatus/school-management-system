@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass } from "@/lib/ui";
 import { toDateInputValue, type AcademicYearSuggest } from "@/lib/academicYear";
+import { PageLoader, PulsingDots } from "@/components/ui/PulsingDotsLoader";
 
 const CYCLE_OPTIONS = [
   { value: "1", label: "January – December (calendar year)" },
@@ -357,7 +358,7 @@ export function AcademicYearsTab({
       </Card>
 
       {loading ? (
-        <p className="text-sm text-[var(--muted)]">Loading…</p>
+        <PageLoader minHeight="min-h-[20rem]" />
       ) : years.length === 0 ? (
         <Card>
           <div className="rounded-xl border border-dashed border-[var(--border)] p-8 text-center">
@@ -405,7 +406,13 @@ export function AcademicYearsTab({
           <div className="space-y-4 min-w-0">
             {detailLoading || !detail ? (
               <Card>
-                <p className="text-sm text-[var(--muted)]">{detailLoading ? "Loading year…" : "Select a year"}</p>
+                {detailLoading ? (
+                  <div className="py-8 flex justify-center">
+                    <PulsingDots />
+                  </div>
+                ) : (
+                  <p className="text-sm text-[var(--muted)]">Select a year</p>
+                )}
               </Card>
             ) : (
               <>
@@ -540,7 +547,9 @@ export function AcademicYearsTab({
                     </button>
                   </div>
                   {termsLoading ? (
-                    <p className="text-sm text-[var(--muted)]">Loading terms…</p>
+                    <div className="py-4 flex justify-center">
+                      <PulsingDots size="sm" />
+                    </div>
                   ) : terms.length === 0 ? (
                     <p className="text-sm text-[var(--muted)]">
                       Split the year into terms (e.g. Term 1, Term 2) for fees and exams.

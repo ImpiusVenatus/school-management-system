@@ -6,6 +6,8 @@ import { Modal } from "@/components/ui/Modal";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { TAB_META } from "@/components/settings/settings-nav";
 import { api } from "@/lib/api";
+import { cachedGet, invalidateSettingsCache } from "@/lib/settings-cache";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 import { useSnackbar } from "@/contexts/SnackbarContext";
 import { btnPrimary, btnSecondary, inputClass, labelClass } from "@/lib/ui";
 
@@ -30,7 +32,7 @@ export function DepartmentsTab({ token }: { token?: string | null }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await api<Department[]>("/api/academic/departments", { token: token ?? undefined });
+      const rows = await cachedGet<Department[]>("/api/academic/departments", { token: token ?? undefined });
       setDepartments(rows);
     } catch {
       snackbar.error("Could not load departments");
@@ -93,14 +95,18 @@ export function DepartmentsTab({ token }: { token?: string | null }) {
   }
 
   async function toggleActive(d: Department) {
+    const next = !d.is_active;
+    setDepartments((prev) => prev.map((x) => (x.id === d.id ? { ...x, is_active: next } : x)));
     try {
       const updated = await api<Department>(`/api/academic/departments/${d.id}`, {
         token: token ?? undefined,
         method: "PATCH",
-        body: JSON.stringify({ is_active: !d.is_active }),
+        body: JSON.stringify({ is_active: next }),
       });
       setDepartments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      invalidateSettingsCache("/api/academic/departments");
     } catch {
+      setDepartments((prev) => prev.map((x) => (x.id === d.id ? { ...x, is_active: d.is_active } : x)));
       snackbar.error("Could not update");
     }
   }
@@ -144,7 +150,7 @@ export function DepartmentsTab({ token }: { token?: string | null }) {
 
       <Card className="p-0 overflow-hidden">
         {loading ? (
-          <p className="p-6 text-sm text-[var(--muted)]">Loading…</p>
+          <PageLoader minHeight="min-h-[12rem]" />
         ) : departments.length === 0 ? (
           <p className="p-6 text-sm text-[var(--muted)]">
             No departments yet. Create departments (e.g. Languages, STEM), then assign subjects under{" "}

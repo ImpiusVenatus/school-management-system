@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
@@ -20,6 +20,21 @@ import { AuditLogTab } from "@/components/settings/AuditLogTab";
 import { tabFromParam, VALID_TABS, type SettingsTab } from "@/components/settings/settings-nav";
 import type { SchoolProfile } from "@/components/settings/types";
 import { Card } from "@/components/ui/Card";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
+
+function TabPanel({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className={active ? undefined : "hidden"} aria-hidden={!active}>
+      {children}
+    </div>
+  );
+}
 
 type TypeImpact = {
   current_school_type: string;
@@ -225,12 +240,12 @@ function SettingsPageInner() {
   }
 
   if (loading) {
-    return <p className="text-[var(--muted)]">Loading settings…</p>;
+    return <PageLoader minHeight="min-h-[50vh]" />;
   }
 
   return (
     <SettingsShell activeTab={activeTab} onTabChange={onTabChange} schoolType={schoolType}>
-      {activeTab === "profile" && (
+      <TabPanel active={activeTab === "profile"}>
         <SchoolProfileTab
           profile={profile}
           onChange={onProfileChange}
@@ -252,8 +267,8 @@ function SettingsPageInner() {
             setSchoolType(savedSchoolType);
           }}
         />
-      )}
-      {activeTab === "years" && (
+      </TabPanel>
+      <TabPanel active={activeTab === "years"}>
         <AcademicYearsTab
           token={token}
           startMonth={startMonth}
@@ -261,32 +276,47 @@ function SettingsPageInner() {
           onYearsListChange={onYearsListChange}
           onActiveYearChange={onActiveYearChange}
         />
-      )}
-      {activeTab === "classes" && (
+      </TabPanel>
+      <TabPanel active={activeTab === "classes"}>
         <ClassesSectionsTab
           token={token}
           schoolType={schoolType}
           activeYearId={activeYearId}
           years={yearOptions}
+          isActive={activeTab === "classes"}
         />
-      )}
-      {activeTab === "departments" && <DepartmentsTab token={token} />}
-      {activeTab === "subjects" && <SubjectsTab token={token} schoolType={schoolType} />}
-      {activeTab === "grade-scales" && <GradeScalesTab token={token} />}
-      {activeTab === "roles" && <RolesSettingsTab token={token} />}
-      {activeTab === "fee-categories" && (
+      </TabPanel>
+      <TabPanel active={activeTab === "departments"}>
+        <DepartmentsTab token={token} />
+      </TabPanel>
+      <TabPanel active={activeTab === "subjects"}>
+        <SubjectsTab token={token} schoolType={schoolType} />
+      </TabPanel>
+      <TabPanel active={activeTab === "grade-scales"}>
+        <GradeScalesTab token={token} />
+      </TabPanel>
+      <TabPanel active={activeTab === "roles"}>
+        <RolesSettingsTab token={token} />
+      </TabPanel>
+      <TabPanel active={activeTab === "fee-categories"}>
         <FeeCategoriesTab token={token} years={yearOptions} activeYearId={activeYearId} />
-      )}
-      {activeTab === "notifications" && <NotificationsTab token={token} />}
-      {activeTab === "integrations" && <IntegrationsTab />}
-      {activeTab === "audit-log" && <AuditLogTab />}
+      </TabPanel>
+      <TabPanel active={activeTab === "notifications"}>
+        <NotificationsTab token={token} />
+      </TabPanel>
+      <TabPanel active={activeTab === "integrations"}>
+        <IntegrationsTab />
+      </TabPanel>
+      <TabPanel active={activeTab === "audit-log"}>
+        <AuditLogTab token={token} />
+      </TabPanel>
     </SettingsShell>
   );
 }
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<p className="text-[var(--muted)]">Loading…</p>}>
+    <Suspense fallback={<PageLoader minHeight="min-h-[50vh]" />}>
       <SettingsPageInner />
     </Suspense>
   );

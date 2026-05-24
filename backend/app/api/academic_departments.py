@@ -16,8 +16,28 @@ from app.services.id_gen import new_id
 router = APIRouter(tags=["academic-departments"])
 
 
-def _dept_response(db: Session, row: AcademicDepartment) -> AcademicDepartmentResponse:
-    count = db.query(K12Subject).filter(K12Subject.department_id == row.id).count()
+def _subject_counts_by_department(db: Session) -> dict[str, int]:
+    rows = (
+        db.query(K12Subject.department_id, func.count())
+        .filter(K12Subject.department_id.isnot(None))
+        .group_by(K12Subject.department_id)
+        .all()
+    )
+    return {dept_id: int(cnt) for dept_id, cnt in rows}
+
+
+def _dept_response(
+    row: AcademicDepartment,
+    subject_counts: dict[str, int] | None = None,
+    *,
+    db: Session | None = None,
+) -> AcademicDepartmentResponse:
+    if subject_counts is not None:
+        count = subject_counts.get(row.id, 0)
+    elif db is not None:
+        count = db.query(K12Subject).filter(K12Subject.department_id == row.id).count()
+    else:
+        count = 0
     return AcademicDepartmentResponse(
         id=row.id,
         name=row.name,
@@ -37,7 +57,8 @@ def list_departments(
     if active_only:
         q = q.filter(AcademicDepartment.is_active == True)
     rows = q.order_by(AcademicDepartment.name).all()
-    return [_dept_response(db, r) for r in rows]
+    counts = _subject_counts_by_department(db)
+    return [_dept_response(r, counts) for r in rows]
 
 
 @router.post("/departments", response_model=AcademicDepartmentResponse)
@@ -58,7 +79,7 @@ def create_department(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _dept_response(db, row)
+    return _dept_response(row, db=db)
 
 
 @router.patch("/departments/{department_id}", response_model=AcademicDepartmentResponse)
@@ -87,7 +108,7 @@ def update_department(
         row.is_active = body.is_active
     db.commit()
     db.refresh(row)
-    return _dept_response(db, row)
+    return _dept_response(row, db=db)
 
 
 @router.delete("/departments/{department_id}", status_code=204)
