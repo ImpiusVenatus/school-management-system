@@ -1,20 +1,29 @@
 """School Management System - FastAPI backend (reference: Frappe Education)."""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import DBAPIError, OperationalError
 
-from app.config import get_settings
+from app.config import get_settings, parse_cors_origins
 from app.database import engine, Base, SessionLocal
 from app.api.rbac import _ensure_rbac_initialized
 from app.api import auth, students, programs, courses, enrollment, academic, academic_departments
 from app.api import student_groups, course_schedule, attendance, leave, fees, assessment
-from app.api import instructors, rooms, guardians, applicants, files, setup, clubs, notices
+from app.api import instructors, teacher_designations, rooms, guardians, applicants, files, setup, clubs, notices
 from app.api import settings as settings_api
 from app.api import k12, invoices, rbac, audit
 from app.middleware.audit import AuditMiddleware
+from app.core.errors import (
+    error_response,
+    http_exception_handler,
+    validation_exception_handler,
+    integrity_exception_handler,
+    unhandled_exception_handler,
+)
 
 config = get_settings()
 
@@ -31,22 +40,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=config.APP_NAME, version="1.0.0", lifespan=lifespan)
 
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(IntegrityError, integrity_exception_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
 
 @app.exception_handler(OperationalError)
 @app.exception_handler(DBAPIError)
 async def database_connection_handler(_request: Request, exc: Exception):
     """Return 503 when Neon/Postgres drops an idle SSL connection so the client can retry."""
-    return JSONResponse(
+    _ = exc
+    return error_response(
         status_code=503,
-        content={
-            "detail": "Database connection was interrupted. Please retry your request.",
-        },
+        code="db_unavailable",
+        message="Database connection was interrupted. Please retry your request.",
     )
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if config.DEBUG else parse_cors_origins(config.CORS_ORIGINS),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,6 +82,8 @@ app.include_router(attendance.router, prefix=api_prefix)
 app.include_router(leave.router, prefix=api_prefix)
 app.include_router(fees.router, prefix=api_prefix)
 app.include_router(assessment.router, prefix=api_prefix)
+# Designations routes must register before instructors `/{instructor_id}` or `/designations` is captured as an id.
+app.include_router(teacher_designations.router, prefix=api_prefix)
 app.include_router(instructors.router, prefix=api_prefix)
 app.include_router(rooms.router, prefix=api_prefix)
 app.include_router(guardians.router, prefix=api_prefix)

@@ -3,6 +3,7 @@ export type SettingsTab =
   | "years"
   | "classes"
   | "departments"
+  | "designations"
   | "subjects"
   | "grade-scales"
   | "roles"
@@ -40,6 +41,10 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
       { id: "subjects", label: "Subjects" },
       { id: "grade-scales", label: "Grade scales" },
     ],
+  },
+  {
+    heading: "Staff",
+    items: [{ id: "designations", label: "Teacher designations" }],
   },
   {
     heading: "Access",
@@ -83,6 +88,11 @@ export const TAB_META: Record<
     subtitle: "Group subjects by department (e.g. Languages, STEM). Nothing is predefined — your school defines these.",
     breadcrumb: "Departments",
   },
+  designations: {
+    title: "Teacher designations",
+    subtitle: "Job titles for staff (e.g. Head Teacher, Senior Teacher). Assign when adding or editing teachers.",
+    breadcrumb: "Teacher designations",
+  },
   subjects: {
     title: "Subjects",
     subtitle: "Teachable subjects in your catalog. Assign them to classes from Classes & sections.",
@@ -125,6 +135,7 @@ export const VALID_TABS: SettingsTab[] = [
   "years",
   "classes",
   "departments",
+  "designations",
   "subjects",
   "grade-scales",
   "roles",

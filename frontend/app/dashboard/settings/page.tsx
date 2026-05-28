@@ -10,6 +10,7 @@ import { SchoolProfileTab } from "@/components/settings/SchoolProfileTab";
 import { AcademicYearsTab, type AcademicYearRow } from "@/components/settings/AcademicYearsTab";
 import { ClassesSectionsTab } from "@/components/settings/ClassesSectionsTab";
 import { DepartmentsTab } from "@/components/settings/DepartmentsTab";
+import { DesignationsTab } from "@/components/settings/DesignationsTab";
 import { SubjectsTab } from "@/components/settings/SubjectsTab";
 import { GradeScalesTab } from "@/components/settings/GradeScalesTab";
 import { FeeCategoriesTab } from "@/components/settings/FeeCategoriesTab";
@@ -288,6 +289,9 @@ function SettingsPageInner() {
       </TabPanel>
       <TabPanel active={activeTab === "departments"}>
         <DepartmentsTab token={token} />
+      </TabPanel>
+      <TabPanel active={activeTab === "designations"}>
+        <DesignationsTab token={token} />
       </TabPanel>
       <TabPanel active={activeTab === "subjects"}>
         <SubjectsTab token={token} schoolType={schoolType} />

@@ -32,10 +32,11 @@ from app.models.assessment import (
 from app.models.applicant import StudentApplicant
 from app.models.education_settings import EducationSettings
 from app.models.file_record import FileRecord
-from app.models.club import Club, ClubModerator, ClubMember, ClubPost
+from app.models.club import Club, ClubModerator, ClubMember, ClubPost, ClubRole
 from app.models.notice import NoticeCategory, Notice
 from app.models.rbac import Role, Permission, RefreshToken, role_permissions, user_roles
 from app.models.academic_department import AcademicDepartment
+from app.models.teacher_designation import TeacherDesignation
 from app.models.k12 import (
     K12Class,
     K12Section,
@@ -54,6 +55,7 @@ __all__ = [
     "AcademicYear",
     "AcademicTerm",
     "AcademicDepartment",
+    "TeacherDesignation",
     "Program",
     "Course",
     "ProgramCourse",
@@ -95,6 +97,7 @@ __all__ = [
     "ClubModerator",
     "ClubMember",
     "ClubPost",
+    "ClubRole",
     "NoticeCategory",
     "Notice",
     "Role",
