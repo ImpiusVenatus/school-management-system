@@ -5,8 +5,10 @@ import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { AddStudentForm } from "@/components/forms/AddStudentForm";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSnackbar } from "@/contexts/SnackbarContext";
 
 const PAGE_SIZE = 50;
 
@@ -19,7 +21,8 @@ type Student = {
 };
 
 export default function AllStudentsPage() {
-  const { token } = useAuth();
+  const { token, user, loading: authLoading } = useAuth();
+  const snackbar = useSnackbar();
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -28,23 +31,30 @@ export default function AllStudentsPage() {
   const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
-    if (!token) return;
+    if (authLoading) return;
+    if (!user && !token) {
+      setStudents([]);
+      setTotalFetched(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const params = new URLSearchParams();
     params.set("limit", String(PAGE_SIZE));
     params.set("skip", String(page * PAGE_SIZE));
     if (search.trim()) params.set("search", search.trim());
-    api<Student[]>(`/api/students?${params.toString()}`, { token })
+    api<Student[]>(`/api/students?${params.toString()}`, { token: token ?? undefined })
       .then((data) => {
         setStudents(data);
         setTotalFetched(data.length);
       })
-      .catch(() => {
+      .catch((err) => {
         setStudents([]);
         setTotalFetched(0);
+        snackbar.error(err instanceof Error ? err.message : "Failed to load students");
       })
       .finally(() => setLoading(false));
-  }, [token, page, search]);
+  }, [token, user, authLoading, page, search, snackbar]);
 
   const hasMore = totalFetched >= PAGE_SIZE;
   const displayName = (s: Student) => (s.student_name ?? [s.first_name, s.last_name].filter(Boolean).join(" ")) || s.id;
@@ -70,11 +80,11 @@ export default function AllStudentsPage() {
             onSuccess={() => {
               setAddModalOpen(false);
               setPage(0);
-              if (token) {
+              if (user || token) {
                 const params = new URLSearchParams();
                 params.set("limit", String(PAGE_SIZE));
                 params.set("skip", "0");
-                api<Student[]>(`/api/students?${params.toString()}`, { token })
+                api<Student[]>(`/api/students?${params.toString()}`, { token: token ?? undefined })
                   .then((data) => {
                     setStudents(data);
                     setTotalFetched(data.length);
@@ -99,8 +109,8 @@ export default function AllStudentsPage() {
             className="px-3 py-2 border border-gray-200 rounded-lg w-72 focus:ring-2 focus:ring-neutral-900/10 focus:border-[var(--border-strong)]"
           />
         </div>
-        {loading ? (
-          <p className="text-gray-500">Loading...</p>
+        {authLoading || loading ? (
+          <PageLoader minHeight="min-h-[12rem]" />
         ) : (
           <>
             <div className="overflow-x-auto">

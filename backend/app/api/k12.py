@@ -18,7 +18,7 @@ from app.models import (
     Instructor,
     Room,
 )
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 from app.services.grading_scale import k12_class_sort_key, pass_marks_for_full, resolve_grading_scale_for_class
@@ -125,6 +125,7 @@ class TimetableSettingsUpdate(BaseModel):
 class TimetableSlotCreate(BaseModel):
     subject_id: str
     section_id: str | None = None
+    stream: str | None = None
     instructor_id: str | None = None
     room_id: str | None = None
     day_of_week: int = Field(ge=0, le=6)
@@ -135,6 +136,7 @@ class TimetableSlotResponse(BaseModel):
     id: str
     class_id: str
     section_id: str | None
+    stream: str | None = None
     subject_id: str
     subject_name: str
     subject_code: str
@@ -220,13 +222,14 @@ class EnrollmentCreate(BaseModel):
     section_id: str
     academic_year_id: str
     roll_no: str | None = None
+    stream: str | None = None
 
 
 @router.get("/classes", response_model=list[ClassResponse])
 def list_classes(
     academic_year_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("classes.read")),
 ):
     q = db.query(K12Class)
     if academic_year_id:
@@ -235,7 +238,7 @@ def list_classes(
 
 
 @router.post("/classes", response_model=ClassCreateResponse)
-def create_class(body: ClassCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_class(body: ClassCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("classes.manage"))):
     cid = new_id("CLS")
     row = K12Class(
         id=cid,
@@ -276,7 +279,7 @@ def create_class(body: ClassCreate, db: Session = Depends(get_db), current_user:
 def classes_with_sections(
     academic_year_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("classes.read")),
 ):
     """Classes with nested sections and student counts for settings UI."""
     classes = db.query(K12Class).filter(K12Class.academic_year_id == academic_year_id).all()
@@ -337,7 +340,7 @@ def classes_with_sections(
 def list_sections(
     class_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("sections.read")),
 ):
     q = db.query(K12Section)
     if class_id:
@@ -350,7 +353,7 @@ def update_section(
     section_id: str,
     body: SectionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("sections.manage")),
 ):
     row = db.query(K12Section).filter(K12Section.id == section_id).first()
     if not row:
@@ -367,7 +370,7 @@ def update_section(
 
 
 @router.post("/sections", response_model=SectionResponse)
-def create_section(body: SectionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_section(body: SectionCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("sections.manage"))):
     if not db.query(K12Class).filter(K12Class.id == body.class_id).first():
         raise HTTPException(status_code=404, detail="Class not found")
     sid = new_id("SEC")
@@ -413,7 +416,7 @@ def _validate_department_id(db: Session, department_id: str | None) -> None:
 
 
 @router.get("/subjects", response_model=list[SubjectResponse])
-def list_subjects(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_subjects(db: Session = Depends(get_db), current_user: User = Depends(require_permission("subjects.read"))):
     rows = (
         db.query(K12Subject)
         .options(joinedload(K12Subject.department))
@@ -426,7 +429,7 @@ def list_subjects(db: Session = Depends(get_db), current_user: User = Depends(ge
 @router.get("/subjects/options", response_model=list[SubjectOptionResponse])
 def list_subject_options(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.read")),
 ):
     rows = db.query(K12Subject.id, K12Subject.name, K12Subject.code).order_by(K12Subject.name).all()
     return [SubjectOptionResponse(id=r.id, name=r.name, code=r.code) for r in rows]
@@ -435,7 +438,7 @@ def list_subject_options(
 @router.get("/subjects-page", response_model=SubjectsPageResponse)
 def get_subjects_page(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.read")),
 ):
     """Subjects + departments for settings tab in one round-trip."""
     subject_rows = (
@@ -453,7 +456,7 @@ def get_subjects_page(
 
 
 @router.post("/subjects", response_model=SubjectResponse)
-def create_subject(body: SubjectCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_subject(body: SubjectCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("subjects.manage"))):
     if db.query(K12Subject).filter(K12Subject.code == body.code).first():
         raise HTTPException(status_code=400, detail="Subject code exists")
     _validate_department_id(db, body.department_id)
@@ -477,7 +480,7 @@ def update_subject(
     subject_id: str,
     body: SubjectUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     row = db.query(K12Subject).filter(K12Subject.id == subject_id).first()
     if not row:
@@ -506,7 +509,7 @@ def update_subject(
 def delete_subject(
     subject_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     row = db.query(K12Subject).filter(K12Subject.id == subject_id).first()
     if not row:
@@ -562,6 +565,7 @@ def _timetable_slot_response(
         id=row.id,
         class_id=row.class_id,
         section_id=row.section_id,
+        stream=getattr(row, "stream", None),
         subject_id=row.subject_id,
         subject_name=sub.name if sub else "",
         subject_code=sub.code if sub else "",
@@ -628,7 +632,7 @@ def _timetable_slot_response_db(db: Session, row: K12TimetableSlot) -> Timetable
 def get_class_setup(
     class_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("classes.read")),
 ):
     cls = _get_class_or_404(class_id, db)
     scale = resolve_grading_scale_for_class(db, cls)
@@ -721,7 +725,7 @@ def update_class(
     class_id: str,
     body: ClassUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("classes.manage")),
 ):
     row = _get_class_or_404(class_id, db)
     if body.name is not None:
@@ -738,7 +742,7 @@ def assign_class_subject(
     class_id: str,
     body: ClassSubjectAssign,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     cls = _get_class_or_404(class_id, db)
     sub = db.query(K12Subject).filter(K12Subject.id == body.subject_id).first()
@@ -774,7 +778,7 @@ def update_class_subject_marks(
     subject_id: str,
     body: ClassSubjectMarksUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     link = (
         db.query(K12ClassSubject)
@@ -804,7 +808,7 @@ def remove_class_subject(
     class_id: str,
     subject_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     link = (
         db.query(K12ClassSubject)
@@ -822,7 +826,7 @@ def update_timetable_settings(
     class_id: str,
     body: TimetableSettingsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("timetable.manage")),
 ):
     cls = _get_class_or_404(class_id, db)
     if body.break_after_period > body.periods_per_day:
@@ -843,7 +847,7 @@ def create_timetable_slot(
     class_id: str,
     body: TimetableSlotCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("timetable.manage")),
 ):
     cls = _get_class_or_404(class_id, db)
     max_period = periods_per_day(cls) - 1
@@ -863,19 +867,27 @@ def create_timetable_slot(
         K12Section.id == body.section_id, K12Section.class_id == class_id
     ).first():
         raise HTTPException(status_code=400, detail="Invalid section for this class")
+    allowed_streams = {"Science", "Commerce", "Arts"}
+    stream = (body.stream or "").strip() or None
+    if stream and stream not in allowed_streams:
+        raise HTTPException(status_code=400, detail="Invalid stream (use Science, Commerce, or Arts)")
+
     from_t, to_t = period_times(cls, body.period_index)
     existing = (
         db.query(K12TimetableSlot)
         .filter(
             K12TimetableSlot.class_id == class_id,
+            K12TimetableSlot.section_id == (body.section_id or None),
             K12TimetableSlot.day_of_week == body.day_of_week,
             K12TimetableSlot.period_index == body.period_index,
+            K12TimetableSlot.stream == stream,
         )
         .first()
     )
     if existing:
         existing.subject_id = body.subject_id
         existing.section_id = body.section_id
+        existing.stream = stream
         existing.instructor_id = body.instructor_id
         existing.room_id = body.room_id
         existing.from_time = from_t
@@ -887,6 +899,7 @@ def create_timetable_slot(
         id=new_id("TT"),
         class_id=class_id,
         section_id=body.section_id,
+        stream=stream,
         subject_id=body.subject_id,
         instructor_id=body.instructor_id,
         room_id=body.room_id,
@@ -905,7 +918,7 @@ def create_timetable_slot(
 def delete_timetable_slot(
     slot_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("timetable.manage")),
 ):
     row = db.query(K12TimetableSlot).filter(K12TimetableSlot.id == slot_id).first()
     if not row:
@@ -920,7 +933,7 @@ def assign_subject_legacy(
     subject_id: str,
     full_marks: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     """Legacy query-param assign; prefer POST /classes/{class_id}/subjects."""
     body = ClassSubjectAssign(subject_id=subject_id, full_marks=full_marks)
@@ -929,24 +942,51 @@ def assign_subject_legacy(
 
 @router.get("/enrollments")
 def list_enrollments(
+    student_id: str | None = None,
     section_id: str | None = None,
     academic_year_id: str | None = None,
+    include_students: bool = Query(False, description="Include basic student details in each row"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("classes.read")),
 ):
     q = db.query(K12StudentEnrollment)
+    if student_id:
+        q = q.filter(K12StudentEnrollment.student_id == student_id)
     if section_id:
         q = q.filter(K12StudentEnrollment.section_id == section_id)
     if academic_year_id:
         q = q.filter(K12StudentEnrollment.academic_year_id == academic_year_id)
     rows = q.all()
+    section_ids = [r.section_id for r in rows]
+    sections: dict[str, K12Section] = {}
+    classes: dict[str, K12Class] = {}
+    students: dict[str, Student] = {}
+    if section_ids:
+        for s in db.query(K12Section).filter(K12Section.id.in_(section_ids)).all():
+            sections[s.id] = s
+        class_ids = list({s.class_id for s in sections.values()})
+        if class_ids:
+            for c in db.query(K12Class).filter(K12Class.id.in_(class_ids)).all():
+                classes[c.id] = c
+    if include_students:
+        student_ids = [r.student_id for r in rows]
+        if student_ids:
+            for s in db.query(Student).filter(Student.id.in_(student_ids)).all():
+                students[s.id] = s
     return [
         {
             "id": r.id,
             "student_id": r.student_id,
+            "student_name": students.get(r.student_id).student_name if include_students and students.get(r.student_id) else None,
+            "student_email_id": students.get(r.student_id).student_email_id if include_students and students.get(r.student_id) else None,
             "section_id": r.section_id,
+            "section_name": sections.get(r.section_id).name if sections.get(r.section_id) else None,
+            "class_id": classes.get(sections.get(r.section_id).class_id).id if sections.get(r.section_id) and classes.get(sections.get(r.section_id).class_id) else None,
+            "class_name": classes.get(sections.get(r.section_id).class_id).name if sections.get(r.section_id) and classes.get(sections.get(r.section_id).class_id) else None,
+            "numeric_level": classes.get(sections.get(r.section_id).class_id).numeric_level if sections.get(r.section_id) and classes.get(sections.get(r.section_id).class_id) else None,
             "academic_year_id": r.academic_year_id,
             "roll_no": r.roll_no,
+            "stream": getattr(r, "stream", None),
             "status": r.status,
         }
         for r in rows
@@ -954,9 +994,26 @@ def list_enrollments(
 
 
 @router.post("/enrollments")
-def enroll_student(body: EnrollmentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def enroll_student(body: EnrollmentCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("classes.manage"))):
     if not db.query(Student).filter(Student.id == body.student_id).first():
         raise HTTPException(status_code=404, detail="Student not found")
+    sec = db.query(K12Section).filter(K12Section.id == body.section_id).first()
+    if not sec:
+        raise HTTPException(status_code=404, detail="Section not found")
+    cls = db.query(K12Class).filter(K12Class.id == sec.class_id).first()
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    allowed_streams = {"Science", "Commerce", "Arts"}
+    stream = (body.stream or "").strip() or None
+    if cls.numeric_level is not None and cls.numeric_level >= 9:
+        if not stream:
+            raise HTTPException(status_code=400, detail="Stream is required for class 9+")
+        if stream not in allowed_streams:
+            raise HTTPException(status_code=400, detail="Invalid stream (use Science, Commerce, or Arts)")
+    else:
+        # For class < 9, stream must not be set
+        stream = None
     existing = db.query(K12StudentEnrollment).filter(
         K12StudentEnrollment.student_id == body.student_id,
         K12StudentEnrollment.academic_year_id == body.academic_year_id,
@@ -970,6 +1027,7 @@ def enroll_student(body: EnrollmentCreate, db: Session = Depends(get_db), curren
         section_id=body.section_id,
         academic_year_id=body.academic_year_id,
         roll_no=body.roll_no,
+        stream=stream,
         enrolled_on=date.today(),
         status="active",
     )

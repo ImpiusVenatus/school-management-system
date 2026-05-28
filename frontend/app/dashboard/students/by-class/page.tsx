@@ -1,77 +1,127 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { SelectField } from "@/components/ui/SelectField";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 
-type Program = { id: string; program_name: string; program_abbreviation?: string };
-type StudentGroup = { id: string; student_group_name: string; students?: { student: string; student_name: string }[] };
-type GroupStudent = { student: string; student_name: string };
+type AcademicYearLite = { id: string; academic_year_name: string; is_active?: boolean };
+type K12SectionRow = { id: string; name: string; capacity: number; student_count: number };
+type K12ClassRow = { id: string; name: string; numeric_level: number | null; sections: K12SectionRow[] };
+type EnrollmentRow = {
+  id: string;
+  student_id: string;
+  student_name: string | null;
+  roll_no: string | null;
+  stream: string | null;
+};
 
 export default function StudentsByClassPage() {
   const { token, user, loading: authLoading } = useAuth();
-  const [programs, setPrograms] = useState<Program[]>([]);
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
-  const [groups, setGroups] = useState<StudentGroup[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [sectionStudents, setSectionStudents] = useState<GroupStudent[]>([]);
-  const [loadingPrograms, setLoadingPrograms] = useState(true);
-  const [loadingGroups, setLoadingGroups] = useState(false);
-  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [years, setYears] = useState<AcademicYearLite[]>([]);
+  const [yearId, setYearId] = useState("");
+  const [structure, setStructure] = useState<K12ClassRow[]>([]);
+  const [classId, setClassId] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
+  const [loadingYears, setLoadingYears] = useState(true);
+  const [loadingStructure, setLoadingStructure] = useState(false);
+  const [loadingEnrollments, setLoadingEnrollments] = useState(false);
 
   const apiOpts = { token: token ?? undefined };
 
   useEffect(() => {
     if (authLoading) return;
     if (!user && !token) {
-      setLoadingPrograms(false);
+      setLoadingYears(false);
       return;
     }
-    setLoadingPrograms(true);
-    api<Program[]>("/api/programs?limit=200", apiOpts)
-      .then(setPrograms)
-      .catch(() => setPrograms([]))
-      .finally(() => setLoadingPrograms(false));
+    setLoadingYears(true);
+    api<AcademicYearLite[]>("/api/academic/years?include_counts=false", apiOpts)
+      .then((rows) => {
+        const list = Array.isArray(rows) ? rows : [];
+        setYears(list);
+        const active = list.find((y) => y.is_active) ?? list[0];
+        if (active && !yearId) setYearId(active.id);
+      })
+      .catch(() => setYears([]))
+      .finally(() => setLoadingYears(false));
+    // yearId intentionally excluded: we only auto-set once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user, authLoading]);
 
   useEffect(() => {
     if (authLoading || (!user && !token)) return;
-    if (!selectedProgramId) {
-      setGroups([]);
-      setSelectedGroupId(null);
-      setSectionStudents([]);
+    if (!yearId) {
+      setStructure([]);
+      setClassId("");
+      setSectionId("");
+      setEnrollments([]);
       return;
     }
-    setLoadingGroups(true);
-    api<StudentGroup[]>(
-      `/api/student-groups?program_id=${encodeURIComponent(selectedProgramId)}&limit=200`,
-      apiOpts
-    )
-      .then(setGroups)
-      .catch(() => setGroups([]))
-      .finally(() => setLoadingGroups(false));
-    setSelectedGroupId(null);
-    setSectionStudents([]);
-  }, [token, user, authLoading, selectedProgramId]);
+    setLoadingStructure(true);
+    api<K12ClassRow[]>(`/api/k12/structure?academic_year_id=${encodeURIComponent(yearId)}`, apiOpts)
+      .then((rows) => setStructure(Array.isArray(rows) ? rows : []))
+      .catch(() => setStructure([]))
+      .finally(() => setLoadingStructure(false));
+    setClassId("");
+    setSectionId("");
+    setEnrollments([]);
+  }, [token, user, authLoading, yearId]);
+
+  useEffect(() => {
+    if (!classId) {
+      setSectionId("");
+      setEnrollments([]);
+      return;
+    }
+    setSectionId("");
+    setEnrollments([]);
+  }, [classId]);
 
   useEffect(() => {
     if (authLoading || (!user && !token)) return;
-    if (!selectedGroupId) {
-      setSectionStudents([]);
+    if (!yearId || !sectionId) {
+      setEnrollments([]);
       return;
     }
-    setLoadingStudents(true);
-    api<GroupStudent[]>(`/api/student-groups/${selectedGroupId}/students`, apiOpts)
-      .then(setSectionStudents)
-      .catch(() => setSectionStudents([]))
-      .finally(() => setLoadingStudents(false));
-  }, [token, user, authLoading, selectedGroupId]);
+    setLoadingEnrollments(true);
+    api<any[]>(
+      `/api/k12/enrollments?academic_year_id=${encodeURIComponent(yearId)}&section_id=${encodeURIComponent(sectionId)}&include_students=true`,
+      apiOpts
+    )
+      .then((rows) => {
+        const list = (Array.isArray(rows) ? rows : []).map((r) => ({
+          id: r.id,
+          student_id: r.student_id,
+          student_name: r.student_name ?? null,
+          roll_no: r.roll_no ?? null,
+          stream: r.stream ?? null,
+        }));
+        setEnrollments(list);
+      })
+      .catch(() => setEnrollments([]))
+      .finally(() => setLoadingEnrollments(false));
+  }, [token, user, authLoading, yearId, sectionId]);
 
-  const selectedProgram = programs.find((p) => p.id === selectedProgramId);
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
+  const selectedClass = useMemo(() => structure.find((c) => c.id === classId) ?? null, [structure, classId]);
+  const needsStream = (selectedClass?.numeric_level ?? 0) >= 9;
+
+  const yearOptions = useMemo(
+    () => [{ value: "", label: "Select academic year…" }, ...years.map((y) => ({ value: y.id, label: y.academic_year_name }))],
+    [years]
+  );
+  const classOptions = useMemo(
+    () => [{ value: "", label: "Select class…" }, ...structure.map((c) => ({ value: c.id, label: c.name }))],
+    [structure]
+  );
+  const sectionOptions = useMemo(() => {
+    if (!selectedClass) return [{ value: "", label: "Select section…" }];
+    return [{ value: "", label: "Select section…" }, ...(selectedClass.sections || []).map((s) => ({ value: s.id, label: s.name }))];
+  }, [selectedClass]);
 
   return (
     <div className="space-y-6">
@@ -83,69 +133,67 @@ export default function StudentsByClassPage() {
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            {loadingPrograms ? (
-              <p className="text-gray-500 text-sm">Loading...</p>
-            ) : (
-              <SelectField
-                label="Class (Program)"
-                options={programs.map((p) => ({ value: p.id, label: p.program_name }))}
-                value={selectedProgramId ?? ""}
-                onChange={(v) => setSelectedProgramId(v || null)}
-                placeholder="Select class"
-              />
-            )}
+        {authLoading ? (
+          <PageLoader minHeight="min-h-[12rem]" />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              {loadingYears ? (
+                <p className="text-gray-500 text-sm">Loading...</p>
+              ) : (
+                <SelectField
+                  label="Academic year"
+                  options={yearOptions}
+                  value={yearId}
+                  onChange={setYearId}
+                  placeholder="Select academic year"
+                />
+              )}
+            </div>
+            <div>
+              {loadingStructure ? (
+                <>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+                  <p className="text-gray-500 text-sm py-2">Loading...</p>
+                </>
+              ) : (
+                <SelectField
+                  label="Class"
+                  options={classOptions}
+                  value={classId}
+                  onChange={setClassId}
+                  placeholder="Select class"
+                />
+              )}
+            </div>
+            <div>
+              {!classId ? (
+                <>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+                  <p className="text-gray-500 text-sm py-2">Select a class first</p>
+                </>
+              ) : (
+                <SelectField
+                  label="Section"
+                  options={sectionOptions}
+                  value={sectionId}
+                  onChange={setSectionId}
+                  placeholder="Select section"
+                />
+              )}
+            </div>
           </div>
-
-          <div>
-            {!selectedProgramId ? (
-              <>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
-                <p className="text-gray-500 text-sm py-2">Select a class first</p>
-              </>
-            ) : loadingGroups ? (
-              <>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
-                <p className="text-gray-500 text-sm py-2">Loading...</p>
-              </>
-            ) : (
-              <SelectField
-                label="Section"
-                options={groups.map((g) => ({ value: g.id, label: g.student_group_name }))}
-                value={selectedGroupId ?? ""}
-                onChange={(v) => setSelectedGroupId(v || null)}
-                placeholder="Select section"
-              />
-            )}
-          </div>
-
-          <div className="flex items-end">
-            {selectedProgramId && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedProgramId(null);
-                  setSelectedGroupId(null);
-                  setSectionStudents([]);
-                }}
-                className="py-2 px-4 rounded-xl border border-[var(--border)] text-gray-700 hover:bg-gray-50 text-sm"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
+        )}
       </Card>
 
-      {selectedProgram && selectedGroup && (
+      {selectedClass && sectionId && (
         <Card>
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            {selectedProgram.program_name} → {selectedGroup.student_group_name}
+            {selectedClass.name} → {selectedClass.sections.find((s) => s.id === sectionId)?.name ?? "Section"}
           </h2>
-          {loadingStudents ? (
+          {loadingEnrollments ? (
             <p className="text-gray-500">Loading students...</p>
-          ) : sectionStudents.length === 0 ? (
+          ) : enrollments.length === 0 ? (
             <p className="text-gray-500">No students in this section.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -154,16 +202,20 @@ export default function StudentsByClassPage() {
                   <tr className="border-b text-left text-gray-500">
                     <th className="pb-2 pr-4">#</th>
                     <th className="pb-2">Name</th>
+                    <th className="pb-2">Roll</th>
+                    {needsStream && <th className="pb-2">Stream</th>}
                     <th className="pb-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sectionStudents.map((s, i) => (
-                    <tr key={s.student} className="border-b border-gray-100">
+                  {enrollments.map((s, i) => (
+                    <tr key={s.id} className="border-b border-gray-100">
                       <td className="py-2 pr-4">{i + 1}</td>
-                      <td className="py-2 font-medium">{s.student_name ?? s.student}</td>
+                      <td className="py-2 font-medium">{s.student_name ?? s.student_id}</td>
+                      <td className="py-2">{s.roll_no ?? "—"}</td>
+                      {needsStream && <td className="py-2">{s.stream ?? "—"}</td>}
                       <td className="py-2">
-                        <Link href={`/dashboard/students/${s.student}`} className="text-[var(--foreground)] hover:underline font-medium">
+                        <Link href={`/dashboard/students/${s.student_id}`} className="text-[var(--foreground)] hover:underline font-medium">
                           View
                         </Link>
                       </td>

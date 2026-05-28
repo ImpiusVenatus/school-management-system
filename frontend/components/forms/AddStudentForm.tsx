@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
@@ -21,6 +22,18 @@ interface AddStudentFormProps {
   onSuccess: () => void;
   onCancel: () => void;
 }
+
+type AcademicYearLite = { id: string; academic_year_name: string; is_active?: boolean };
+type K12SectionRow = { id: string; name: string; capacity: number; class_teacher_id?: string | null; student_count?: number };
+type K12ClassRow = { id: string; name: string; numeric_level: number | null; sections: K12SectionRow[] };
+type K12StructureRow = { id: string; name: string; numeric_level: number | null; sections: K12SectionRow[] };
+
+const STREAM_OPTIONS: DropdownOption[] = [
+  { value: "", label: "—" },
+  { value: "Science", label: "Science" },
+  { value: "Commerce", label: "Commerce" },
+  { value: "Arts", label: "Arts" },
+];
 
 export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
   const { token } = useAuth();
@@ -45,7 +58,74 @@ export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
   const [pincode, setPincode] = useState("");
   const [country, setCountry] = useState("");
 
+  const [years, setYears] = useState<AcademicYearLite[]>([]);
+  const [yearId, setYearId] = useState("");
+  const [structure, setStructure] = useState<K12StructureRow[]>([]);
+  const [classId, setClassId] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const [rollNo, setRollNo] = useState("");
+  const [stream, setStream] = useState("");
+  const [loadingStructure, setLoadingStructure] = useState(true);
+
   const [guardians, setGuardians] = useState<GuardianRow[]>([{ guardian_name: "", email_address: "", mobile_number: "", relation: "" }]);
+
+  useEffect(() => {
+    api<AcademicYearLite[]>("/api/academic/years?include_counts=false", { token: token ?? undefined })
+      .then((rows) => {
+        const list = Array.isArray(rows) ? rows : [];
+        setYears(list);
+        const active = list.find((y) => y.is_active) ?? list[0];
+        if (active && !yearId) setYearId(active.id);
+      })
+      .catch(() => setYears([]));
+    // yearId intentionally excluded: we only auto-set once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    if (!yearId) {
+      setStructure([]);
+      setClassId("");
+      setSectionId("");
+      setLoadingStructure(false);
+      return;
+    }
+    setLoadingStructure(true);
+    api<K12ClassRow[]>(`/api/k12/structure?academic_year_id=${encodeURIComponent(yearId)}`, { token: token ?? undefined })
+      .then((rows) => setStructure(Array.isArray(rows) ? (rows as any) : []))
+      .catch(() => setStructure([]))
+      .finally(() => setLoadingStructure(false));
+  }, [token, yearId]);
+
+  const selectedClass = useMemo(() => structure.find((c) => c.id === classId) ?? null, [structure, classId]);
+  const classOptions = useMemo(
+    () => [{ value: "", label: "Select class…" }, ...structure.map((c) => ({ value: c.id, label: c.name }))],
+    [structure]
+  );
+  const sectionOptions = useMemo(() => {
+    if (!selectedClass) return [{ value: "", label: "Select section…" }];
+    return [
+      { value: "", label: "Select section…" },
+      ...(selectedClass.sections || []).map((s) => ({ value: s.id, label: s.name })),
+    ];
+  }, [selectedClass]);
+  const yearOptions = useMemo(
+    () => [{ value: "", label: "Select academic year…" }, ...years.map((y) => ({ value: y.id, label: y.academic_year_name }))],
+    [years]
+  );
+  const needsStream = (selectedClass?.numeric_level ?? 0) >= 9;
+
+  useEffect(() => {
+    // reset dependent selections
+    setSectionId("");
+    setRollNo("");
+    setStream("");
+  }, [classId]);
+
+  useEffect(() => {
+    setRollNo("");
+    setStream("");
+  }, [sectionId]);
 
   const addGuardian = () => {
     setGuardians((g) => [...g, { guardian_name: "", email_address: "", mobile_number: "", relation: "" }]);
@@ -60,6 +140,24 @@ export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!yearId) {
+      const msg = "Academic year is required.";
+      setError(msg);
+      snackbar.error(msg);
+      return;
+    }
+    if (!classId || !sectionId) {
+      const msg = "Class and section are required.";
+      setError(msg);
+      snackbar.error(msg);
+      return;
+    }
+    if (needsStream && !stream) {
+      const msg = "Stream is required for class 9+.";
+      setError(msg);
+      snackbar.error(msg);
+      return;
+    }
     setSaving(true);
     try {
       const guardianIds: { guardian_id: string; guardian_name: string; relation?: string }[] = [];
@@ -81,7 +179,7 @@ export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
         });
       }
 
-      await api("/api/students", {
+      const createdStudent = await api<{ id: string; student_email_id?: string }>("/api/students", {
         token: token ?? undefined,
         method: "POST",
         body: JSON.stringify({
@@ -104,6 +202,18 @@ export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
           guardians: guardianIds,
         }),
       });
+
+      await api("/api/k12/enrollments", {
+        token: token ?? undefined,
+        method: "POST",
+        body: JSON.stringify({
+          student_id: createdStudent.id,
+          section_id: sectionId,
+          academic_year_id: yearId,
+          roll_no: rollNo.trim() || undefined,
+          stream: stream || undefined,
+        }),
+      });
       snackbar.success("Student created.");
       onSuccess();
     } catch (err) {
@@ -117,6 +227,46 @@ export function AddStudentForm({ onSuccess, onCancel }: AddStudentFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">Enrollment</h3>
+        {loadingStructure ? (
+          <p className="text-sm text-[var(--muted)]">Loading class structure…</p>
+        ) : structure.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">
+            No classes/sections found for the selected academic year. Set them up in{" "}
+            <Link href="/dashboard/settings?tab=classes" className="text-[var(--primary)] underline">
+              Settings → Classes & sections
+            </Link>
+            .
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className={labelClass}>Academic year *</label>
+              <SelectField options={yearOptions} value={yearId} onChange={setYearId} placeholder="Select academic year…" required />
+            </div>
+            <div>
+              <label className={labelClass}>Class *</label>
+              <SelectField options={classOptions} value={classId} onChange={setClassId} placeholder="Select class…" required />
+            </div>
+            <div>
+              <label className={labelClass}>Section *</label>
+              <SelectField options={sectionOptions} value={sectionId} onChange={setSectionId} placeholder="Select section…" required disabled={!classId} />
+            </div>
+            <div>
+              <label className={labelClass}>Roll no</label>
+              <input type="text" value={rollNo} onChange={(e) => setRollNo(e.target.value)} className={inputClass} placeholder="e.g. 12" disabled={!sectionId} />
+            </div>
+            {needsStream && (
+              <div className="sm:col-span-2 lg:col-span-2">
+                <label className={labelClass}>Stream (Class 9+) *</label>
+                <SelectField options={STREAM_OPTIONS} value={stream} onChange={setStream} placeholder="Select stream…" required />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div>
         <h3 className="text-sm font-semibold text-gray-900 mb-3">Personal</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

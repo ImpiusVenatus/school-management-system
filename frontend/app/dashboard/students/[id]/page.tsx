@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { SelectField, GENDER_OPTIONS } from "@/components/ui/SelectField";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSnackbar } from "@/contexts/SnackbarContext";
@@ -28,14 +29,19 @@ type Student = {
 
 type Enrollment = {
   id: string;
-  grade_level?: string;
-  section_name?: string;
-  student_advisor_name?: string;
+  academic_year_id: string;
+  section_id: string;
+  section_name?: string | null;
+  class_id?: string | null;
+  class_name?: string | null;
+  numeric_level?: number | null;
+  roll_no?: string | null;
+  stream?: string | null;
 };
 
 export default function StudentDetailPage() {
   const params = useParams();
-  const { token, user } = useAuth();
+  const { token, user, loading: authLoading } = useAuth();
   const snackbar = useSnackbar();
   const id = params.id as string;
   const [student, setStudent] = useState<Student | null>(null);
@@ -52,7 +58,13 @@ export default function StudentDetailPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if ((!user && !token) || !id) return;
+    if (authLoading) return;
+    if ((!user && !token) || !id) {
+      setStudent(null);
+      setEnrollments([]);
+      setLoading(false);
+      return;
+    }
     api<Student>(`/api/students/${id}`, { token: token ?? undefined })
       .then((s) => {
         setStudent(s);
@@ -64,11 +76,11 @@ export default function StudentDetailPage() {
         setCity(s.city ?? "");
       })
       .catch(() => setStudent(null));
-    api<Enrollment[]>(`/api/enrollments?student_id=${id}&limit=10`, { token: token ?? undefined })
+    api<Enrollment[]>(`/api/k12/enrollments?student_id=${encodeURIComponent(id)}&limit=10`, { token: token ?? undefined })
       .then(setEnrollments)
       .catch(() => setEnrollments([]))
       .finally(() => setLoading(false));
-  }, [token, id]);
+  }, [token, user, authLoading, id]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -98,7 +110,18 @@ export default function StudentDetailPage() {
     }
   }
 
-  if (loading && !student) return <div className="text-gray-500">Loading...</div>;
+  if (authLoading || (loading && !student)) {
+    return (
+      <div className="space-y-6">
+        <Link href="/dashboard/students" className="text-gray-500 hover:text-gray-700">
+          Back to Students
+        </Link>
+        <Card>
+          <PageLoader minHeight="min-h-[12rem]" />
+        </Card>
+      </div>
+    );
+  }
   if (!student) {
     return (
       <div className="text-gray-500">
@@ -180,9 +203,12 @@ export default function StudentDetailPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Current enrollment</h2>
           {currentEnrollment ? (
             <dl className="space-y-2 text-sm">
-              <div><dt className="text-gray-500">Grade</dt><dd>{currentEnrollment.grade_level ?? "—"}</dd></div>
+              <div><dt className="text-gray-500">Class</dt><dd>{currentEnrollment.class_name ?? "—"}</dd></div>
               <div><dt className="text-gray-500">Section</dt><dd>{currentEnrollment.section_name ?? "—"}</dd></div>
-              <div><dt className="text-gray-500">Advisor</dt><dd>{currentEnrollment.student_advisor_name ?? "—"}</dd></div>
+              <div><dt className="text-gray-500">Roll</dt><dd>{currentEnrollment.roll_no ?? "—"}</dd></div>
+              {(currentEnrollment.numeric_level ?? 0) >= 9 && (
+                <div><dt className="text-gray-500">Stream</dt><dd>{currentEnrollment.stream ?? "—"}</dd></div>
+              )}
             </dl>
           ) : (
             <p className="text-gray-500">No enrollment record.</p>
