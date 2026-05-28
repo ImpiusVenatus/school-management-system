@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { SelectField } from "@/components/ui/SelectField";
 import { Modal } from "@/components/ui/Modal";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { PageLoader } from "@/components/ui/PulsingDotsLoader";
+import { useSnackbar } from "@/contexts/SnackbarContext";
 
 type Schedule = {
   id: string;
@@ -25,8 +27,58 @@ type Course = { id: string; course_name: string };
 type Instructor = { id: string; instructor_name: string };
 type Room = { id: string; room_name: string };
 
+type AcademicYearLite = { id: string; academic_year_name: string; is_active?: boolean };
+type K12SectionRow = { id: string; name: string; capacity: number; class_teacher_id?: string | null };
+type K12StructureRow = { id: string; name: string; numeric_level: number | null; sections: K12SectionRow[] };
+type TimetableSlot = {
+  id: string;
+  class_id: string;
+  section_id: string | null;
+  section_name: string | null;
+  stream: string | null;
+  subject_id: string;
+  subject_name: string;
+  instructor_id: string | null;
+  instructor_name: string | null;
+  room_name: string | null;
+  day_of_week: number;
+  period_index: number;
+  from_time: string;
+  to_time: string;
+};
+type ClassSetup = {
+  id: string;
+  name: string;
+  numeric_level: number | null;
+  academic_year_id: string;
+  timetable_settings: {
+    weekdays: number[];
+    periods_per_day: number;
+    start_time: string;
+    period_minutes: number;
+    break_after_period: number;
+    break_minutes: number;
+  };
+  timetable: TimetableSlot[];
+  sections: Array<{ id: string; name: string }>;
+};
+
 export default function SchedulePage() {
-  const { token } = useAuth();
+  const { token, user, loading: authLoading } = useAuth();
+  const snackbar = useSnackbar();
+
+  const [schoolType, setSchoolType] = useState<"program" | "k12">("program");
+
+  // K12 routine state
+  const [years, setYears] = useState<AcademicYearLite[]>([]);
+  const [yearId, setYearId] = useState("");
+  const [structure, setStructure] = useState<K12StructureRow[]>([]);
+  const [classId, setClassId] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const [streamFilter, setStreamFilter] = useState("");
+  const [classSetup, setClassSetup] = useState<ClassSetup | null>(null);
+  const [loadingK12, setLoadingK12] = useState(true);
+
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [groups, setGroups] = useState<StudentGroup[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -79,6 +131,99 @@ export default function SchedulePage() {
     loadSchedules();
   }, [loadSchedules]);
 
+  // Determine school type
+  useEffect(() => {
+    if (authLoading) return;
+    api<{ school_type?: string; current_academic_year_id?: string | null }>("/api/settings", { token: token ?? undefined })
+      .then((s) => {
+        const t = s.school_type === "k12" ? "k12" : "program";
+        setSchoolType(t);
+        if (s.current_academic_year_id && !yearId) setYearId(s.current_academic_year_id);
+      })
+      .catch(() => setSchoolType("program"));
+    // yearId intentionally excluded (auto-set only once)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, token]);
+
+  // Load K12 years + structure (for the selected year)
+  useEffect(() => {
+    if (schoolType !== "k12") return;
+    if (authLoading) return;
+    if (!user && !token) {
+      setLoadingK12(false);
+      return;
+    }
+    setLoadingK12(true);
+    api<AcademicYearLite[]>("/api/academic/years?include_counts=false", { token: token ?? undefined })
+      .then((rows) => setYears(Array.isArray(rows) ? rows : []))
+      .catch(() => setYears([]));
+  }, [schoolType, authLoading, user, token]);
+
+  useEffect(() => {
+    if (schoolType !== "k12") return;
+    if (!yearId) {
+      setStructure([]);
+      setClassId("");
+      setSectionId("");
+      setClassSetup(null);
+      setLoadingK12(false);
+      return;
+    }
+    setLoadingK12(true);
+    api<K12StructureRow[]>(`/api/k12/structure?academic_year_id=${encodeURIComponent(yearId)}`, { token: token ?? undefined })
+      .then((rows) => setStructure(Array.isArray(rows) ? rows : []))
+      .catch(() => setStructure([]))
+      .finally(() => setLoadingK12(false));
+  }, [schoolType, token, yearId]);
+
+  useEffect(() => {
+    if (schoolType !== "k12") return;
+    if (!classId) {
+      setClassSetup(null);
+      return;
+    }
+    setLoadingK12(true);
+    api<ClassSetup>(`/api/k12/classes/${encodeURIComponent(classId)}/setup`, { token: token ?? undefined })
+      .then((d) => setClassSetup(d))
+      .catch((err) => {
+        setClassSetup(null);
+        snackbar.error(err instanceof Error ? err.message : "Failed to load timetable");
+      })
+      .finally(() => setLoadingK12(false));
+  }, [schoolType, token, classId, snackbar]);
+
+  const yearOptions = useMemo(
+    () => [{ value: "", label: "Select academic year…" }, ...years.map((y) => ({ value: y.id, label: y.academic_year_name }))],
+    [years]
+  );
+  const classOptions = useMemo(
+    () => [{ value: "", label: "Select class…" }, ...structure.map((c) => ({ value: c.id, label: c.name }))],
+    [structure]
+  );
+  const selectedClass = useMemo(() => structure.find((c) => c.id === classId) ?? null, [structure, classId]);
+  const sectionOptions = useMemo(() => {
+    if (!selectedClass) return [{ value: "", label: "All sections" }];
+    return [{ value: "", label: "All sections" }, ...(selectedClass.sections || []).map((s) => ({ value: s.id, label: s.name }))];
+  }, [selectedClass]);
+  const streamOptions = useMemo(
+    () => [
+      { value: "", label: "All streams" },
+      { value: "Science", label: "Science" },
+      { value: "Commerce", label: "Commerce" },
+      { value: "Arts", label: "Arts" },
+    ],
+    []
+  );
+
+  const filteredSlots = useMemo(() => {
+    const slots = classSetup?.timetable ?? [];
+    return slots.filter((s) => {
+      if (sectionId && s.section_id !== sectionId) return false;
+      if (streamFilter && (s.stream || "") !== streamFilter) return false;
+      return true;
+    });
+  }, [classSetup, sectionId, streamFilter]);
+
   async function createSchedule(e: React.FormEvent) {
     e.preventDefault();
     if (!token || !formGroup || !formCourse || !formInstructor || !formRoom || !formDate) return;
@@ -106,6 +251,111 @@ export default function SchedulePage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (schoolType === "k12") {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-gray-900">Routine</h1>
+          <p className="text-sm text-[var(--muted)]">Read-only view of the timetable configured in Settings.</p>
+        </div>
+
+        <Card>
+          {authLoading || loadingK12 ? (
+            <PageLoader minHeight="min-h-[12rem]" />
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <SelectField
+                label="Academic year"
+                options={yearOptions}
+                value={yearId}
+                onChange={(v) => {
+                  setYearId(v);
+                  setClassId("");
+                  setSectionId("");
+                  setStreamFilter("");
+                }}
+                triggerClassName="min-w-[14rem]"
+              />
+              <SelectField
+                label="Class"
+                options={classOptions}
+                value={classId}
+                onChange={(v) => {
+                  setClassId(v);
+                  setSectionId("");
+                  setStreamFilter("");
+                }}
+                triggerClassName="min-w-[14rem]"
+              />
+              <SelectField
+                label="Section"
+                options={sectionOptions}
+                value={sectionId}
+                onChange={setSectionId}
+                placeholder="All sections"
+                triggerClassName="min-w-[10rem]"
+              />
+              <SelectField
+                label="Stream"
+                options={streamOptions}
+                value={streamFilter}
+                onChange={setStreamFilter}
+                placeholder="All streams"
+                triggerClassName="min-w-[10rem]"
+              />
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          {!classId ? (
+            <p className="text-sm text-[var(--muted)]">Select a class to view its timetable.</p>
+          ) : !classSetup ? (
+            <p className="text-sm text-[var(--muted)]">No timetable found for this class.</p>
+          ) : filteredSlots.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">No timetable slots match the current filters.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500">
+                    <th className="pb-2">Day</th>
+                    <th className="pb-2">Period</th>
+                    <th className="pb-2">Time</th>
+                    <th className="pb-2">Section</th>
+                    <th className="pb-2">Stream</th>
+                    <th className="pb-2">Subject</th>
+                    <th className="pb-2">Teacher</th>
+                    <th className="pb-2">Room</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSlots
+                    .slice()
+                    .sort((a, b) => (a.day_of_week - b.day_of_week) || (a.period_index - b.period_index))
+                    .map((s) => (
+                      <tr key={s.id} className="border-b border-gray-100">
+                        <td className="py-2">
+                          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][s.day_of_week] ?? String(s.day_of_week)}
+                        </td>
+                        <td className="py-2">{s.period_index + 1}</td>
+                        <td className="py-2">{String(s.from_time).slice(0, 5)} – {String(s.to_time).slice(0, 5)}</td>
+                        <td className="py-2">{s.section_name ?? "All"}</td>
+                        <td className="py-2">{s.stream ?? "All"}</td>
+                        <td className="py-2 font-medium">{s.subject_name}</td>
+                        <td className="py-2">{s.instructor_name ?? "—"}</td>
+                        <td className="py-2">{s.room_name ?? "—"}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
   }
 
   return (
