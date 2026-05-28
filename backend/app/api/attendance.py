@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import StudentAttendance, Student
 from app.schemas.attendance import StudentAttendanceCreate, StudentAttendanceResponse, MarkAttendanceRequest
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -20,7 +20,7 @@ def list_attendance(
     date: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=1000),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("attendance.read")),
 ):
     q = db.query(StudentAttendance)
     if student_id:
@@ -54,7 +54,7 @@ def check_attendance_records_exist(
     student_group_id: str | None = None,
     date: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("attendance.read")),
 ):
     """Check if attendance records exist for given schedule or group+date."""
     if course_schedule_id:
@@ -105,7 +105,7 @@ def _make_attendance(db: Session, student_id: str, student_name: str, status: st
 def mark_attendance(
     body: MarkAttendanceRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("attendance.mark")),
 ):
     """Create/update attendance records for present and absent lists."""
     for d in body.students_present:
@@ -135,7 +135,7 @@ def mark_attendance(
 def create_attendance(
     body: StudentAttendanceCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("attendance.mark")),
 ):
     rec = StudentAttendance(
         id=new_id("ATT"),

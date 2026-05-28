@@ -27,7 +27,7 @@ from app.schemas.academic import (
     AcademicTermUpdate,
     AcademicTermResponse,
 )
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 from app.services.academic_year import (
@@ -88,7 +88,7 @@ def _year_summary(db: Session, r: AcademicYear, active_id: str | None, school_ty
 def list_academic_years(
     include_counts: bool = Query(True, description="Set false for dropdowns (skips class/section/student counts)"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.read")),
 ):
     settings = _get_settings(db)
     school_type = settings.school_type or "program"
@@ -112,7 +112,7 @@ def list_academic_years(
 @router.get("/years/suggest", response_model=AcademicYearSuggestResponse)
 def suggest_academic_year(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.read")),
 ):
     settings = _get_settings(db)
     start_month = settings.academic_year_start_month or 1
@@ -132,7 +132,7 @@ def suggest_academic_year(
 def create_academic_year(
     body: AcademicYearCreateBody,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     settings = _get_settings(db)
     start_month = settings.academic_year_start_month or 1
@@ -177,7 +177,7 @@ def create_academic_year(
 def activate_academic_year(
     year_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     row = db.query(AcademicYear).filter(AcademicYear.id == year_id).first()
     if not row:
@@ -205,7 +205,7 @@ def update_academic_year(
     year_id: str,
     body: AcademicYearUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     row = db.query(AcademicYear).filter(AcademicYear.id == year_id).first()
     if not row:
@@ -228,7 +228,7 @@ def update_academic_year(
 def get_academic_year(
     year_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.read")),
 ):
     r = db.query(AcademicYear).filter(AcademicYear.id == year_id).first()
     if not r:
@@ -255,7 +255,7 @@ def _year_progress(start: date, end: date, today: date | None = None) -> tuple[i
 def get_academic_year_detail(
     year_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.read")),
 ):
     r = db.query(AcademicYear).filter(AcademicYear.id == year_id).first()
     if not r:
@@ -279,7 +279,7 @@ def get_academic_year_detail(
 def list_academic_terms(
     db: Session = Depends(get_db),
     academic_year_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.read")),
 ):
     q = db.query(AcademicTerm)
     if academic_year_id:
@@ -302,7 +302,7 @@ def list_academic_terms(
 def create_academic_term(
     body: AcademicTermCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     title = f"{body.term_name} ({body.academic_year_id})"
     if db.query(AcademicTerm).filter(AcademicTerm.title == title).first():
@@ -334,7 +334,7 @@ def update_academic_term(
     term_id: str,
     body: AcademicTermUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     row = db.query(AcademicTerm).filter(AcademicTerm.id == term_id).first()
     if not row:
@@ -365,7 +365,7 @@ def update_academic_term(
 def delete_academic_term(
     term_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("academic_years.manage")),
 ):
     row = db.query(AcademicTerm).filter(AcademicTerm.id == term_id).first()
     if not row:

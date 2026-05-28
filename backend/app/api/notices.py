@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Notice, NoticeCategory, User
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.services.id_gen import new_id
 from pydantic import BaseModel
 
@@ -67,7 +67,7 @@ def _is_admin(user: User) -> bool:
 @router.get("/categories", response_model=list[NoticeCategoryResponse])
 def list_categories(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.read")),
 ):
     rows = db.query(NoticeCategory).order_by(NoticeCategory.idx, NoticeCategory.name).all()
     return [NoticeCategoryResponse(id=r.id, name=r.name, slug=r.slug, idx=r.idx or 0) for r in rows]
@@ -77,10 +77,8 @@ def list_categories(
 def create_category(
     body: NoticeCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only admin can create categories")
     cid = body.name.replace(" ", "-")[:30] or new_id("NC")
     c = NoticeCategory(id=cid, name=body.name, slug=body.slug)
     db.add(c)
@@ -94,10 +92,8 @@ def update_category(
     category_id: str,
     body: NoticeCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only admin can update categories")
     c = db.query(NoticeCategory).filter(NoticeCategory.id == category_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -112,10 +108,8 @@ def update_category(
 def delete_category(
     category_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only admin can delete categories")
     c = db.query(NoticeCategory).filter(NoticeCategory.id == category_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -132,7 +126,7 @@ def list_notices(
     pinned: bool | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.read")),
 ):
     q = db.query(Notice)
     if category_id:
@@ -160,7 +154,7 @@ def list_notices(
 def create_notice(
     body: NoticeCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
     if db.query(NoticeCategory).filter(NoticeCategory.id == body.category_id).first() is None:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -195,7 +189,7 @@ def create_notice(
 def get_notice(
     notice_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.read")),
 ):
     r = db.query(Notice).filter(Notice.id == notice_id).first()
     if not r:
@@ -218,7 +212,7 @@ def update_notice(
     notice_id: str,
     body: NoticeUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
     r = db.query(Notice).filter(Notice.id == notice_id).first()
     if not r:
@@ -244,7 +238,7 @@ def update_notice(
 def delete_notice(
     notice_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("notices.publish")),
 ):
     r = db.query(Notice).filter(Notice.id == notice_id).first()
     if not r:

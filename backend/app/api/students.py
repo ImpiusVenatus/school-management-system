@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Student, StudentGuardian, ProgramEnrollment
 from app.schemas.student import StudentCreate, StudentUpdate, StudentResponse, StudentGuardianItem
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id, student_name as make_student_name
 
@@ -52,7 +52,7 @@ def list_students(
     search: str | None = None,
     grade_level: str | None = None,
     section_name: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("students.read")),
 ):
     q = db.query(Student)
     if search:
@@ -78,7 +78,7 @@ def list_students(
 def create_student(
     body: StudentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("students.create")),
 ):
     if db.query(Student).filter(Student.student_email_id == body.student_email_id).first():
         raise HTTPException(status_code=400, detail="Student with this email already exists")
@@ -125,7 +125,7 @@ def create_student(
 def get_student(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("students.read")),
 ):
     s = db.query(Student).filter(Student.id == student_id).first()
     if not s:
@@ -138,7 +138,7 @@ def update_student(
     student_id: str,
     body: StudentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("students.update")),
 ):
     s = db.query(Student).filter(Student.id == student_id).first()
     if not s:
@@ -161,7 +161,7 @@ def update_student(
 def delete_student(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("students.delete")),
 ):
     s = db.query(Student).filter(Student.id == student_id).first()
     if not s:

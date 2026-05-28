@@ -27,7 +27,7 @@ from app.schemas.assessment import (
     rules_from_json,
     DEFAULT_CALCULATION_RULES,
 )
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 from app.services.grading_scale import (
@@ -149,7 +149,7 @@ def get_grade(
     grading_scale_id: str,
     percentage: float,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     """Return grade code for given percentage from grading scale intervals."""
     rows = db.query(GradingScaleInterval).filter(GradingScaleInterval.parent_id == grading_scale_id).order_by(GradingScaleInterval.threshold.desc()).all()
@@ -164,7 +164,7 @@ def get_grade(
 @router.get("/grading-scales", response_model=list[GradingScaleResponse])
 def list_grading_scales(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     rows = db.query(GradingScale).order_by(GradingScale.is_default.desc(), GradingScale.grading_scale_name).all()
     return [_scale_response(r, db) for r in rows]
@@ -174,7 +174,7 @@ def list_grading_scales(
 def get_grading_scale(
     scale_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
     if not gs:
@@ -186,7 +186,7 @@ def get_grading_scale(
 def create_grading_scale(
     body: GradingScaleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     name = body.grading_scale_name.strip()
     if db.query(GradingScale).filter(GradingScale.grading_scale_name == name).first():
@@ -215,7 +215,7 @@ def update_grading_scale(
     scale_id: str,
     body: GradingScaleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
     if not gs:
@@ -250,7 +250,7 @@ def update_grading_scale(
 def duplicate_grading_scale(
     scale_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
     if not gs:
@@ -281,7 +281,7 @@ def duplicate_grading_scale(
 def delete_grading_scale(
     scale_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
     if not gs:
@@ -301,7 +301,7 @@ def assign_grading_scale_classes(
     scale_id: str,
     body: ClassAssignmentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     gs = db.query(GradingScale).filter(GradingScale.id == scale_id).first()
     if not gs:
@@ -334,7 +334,7 @@ def assign_grading_scale_classes(
 def list_classes_for_assignment(
     academic_year_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     q = db.query(K12Class)
     if academic_year_id:
@@ -357,7 +357,7 @@ def list_assessment_plans(
     db: Session = Depends(get_db),
     student_group_id: str | None = None,
     course_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     q = db.query(AssessmentPlan)
     if student_group_id:
@@ -392,7 +392,7 @@ def list_assessment_plans(
 def create_assessment_plan(
     body: AssessmentPlanCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.manage")),
 ):
     if db.query(AssessmentPlan).filter(AssessmentPlan.assessment_name == body.assessment_name).first():
         raise HTTPException(status_code=400, detail="Assessment plan name exists")
@@ -446,7 +446,7 @@ def create_assessment_plan(
 def get_assessment_plan_criteria(
     plan_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("exams.read")),
 ):
     rows = db.query(AssessmentPlanCriteria).filter(AssessmentPlanCriteria.parent_id == plan_id).order_by(AssessmentPlanCriteria.idx).all()
     return [{"assessment_criteria_id": r.assessment_criteria_id, "maximum_score": r.maximum_score} for r in rows]
@@ -457,7 +457,7 @@ def get_result(
     student_id: str,
     assessment_plan_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("marks.read")),
 ):
     """Return submitted result for student and assessment plan."""
     r = db.query(AssessmentResult).filter(
@@ -482,7 +482,7 @@ def get_result(
 def mark_assessment_result(
     body: AssessmentResultCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("marks.enter")),
 ):
     plan = db.query(AssessmentPlan).filter(AssessmentPlan.id == body.assessment_plan_id).first()
     if not plan:

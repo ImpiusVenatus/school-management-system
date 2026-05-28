@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Guardian, StudentGuardian
 from app.schemas.student import GuardianCreate, GuardianResponse
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -17,7 +17,7 @@ def list_guardians(
     search: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("guardians.read")),
 ):
     q = db.query(Guardian)
     if search:
@@ -30,7 +30,7 @@ def list_guardians(
 def get_student_guardians(
     student_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("guardians.read")),
 ):
     """Return list of guardian ids for a student (like frappe get_student_guardians)."""
     rows = db.query(StudentGuardian).filter(StudentGuardian.parent_id == student_id).all()
@@ -41,7 +41,7 @@ def get_student_guardians(
 def create_guardian(
     body: GuardianCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("guardians.manage")),
 ):
     gid = new_id("GRD")
     row = Guardian(
@@ -61,7 +61,7 @@ def create_guardian(
 def get_guardian(
     guardian_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("guardians.read")),
 ):
     r = db.query(Guardian).filter(Guardian.id == guardian_id).first()
     if not r:

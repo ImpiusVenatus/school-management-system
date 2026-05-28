@@ -31,5 +31,7 @@ class EducationSettings(Base):
     brand_color = Column(String(20), nullable=True)
     currency_code = Column(String(3), nullable=False, default="BDT")
     notification_config = Column(Text, nullable=True)
+    holidays_json = Column(Text, nullable=True)
+    promotion_plan_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

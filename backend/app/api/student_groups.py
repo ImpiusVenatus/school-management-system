@@ -10,7 +10,7 @@ from app.schemas.student_group import (
     StudentGroupStudentItem,
     StudentGroupInstructorItem,
 )
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -50,7 +50,7 @@ def list_student_groups(
     program_id: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.read")),
 ):
     q = db.query(StudentGroup)
     if academic_year_id:
@@ -65,7 +65,7 @@ def list_student_groups(
 def create_student_group(
     body: StudentGroupCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.manage")),
 ):
     if db.query(StudentGroup).filter(StudentGroup.student_group_name == body.student_group_name).first():
         raise HTTPException(status_code=400, detail="Student group name already exists")
@@ -97,7 +97,7 @@ def create_student_group(
 def get_student_group(
     group_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.read")),
 ):
     g = db.query(StudentGroup).filter(StudentGroup.id == group_id).first()
     if not g:
@@ -110,7 +110,7 @@ def update_student_group(
     group_id: str,
     body: StudentGroupUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.manage")),
 ):
     g = db.query(StudentGroup).filter(StudentGroup.id == group_id).first()
     if not g:
@@ -152,7 +152,7 @@ def update_student_group(
 def delete_student_group(
     group_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.manage")),
 ):
     g = db.query(StudentGroup).filter(StudentGroup.id == group_id).first()
     if not g:
@@ -169,7 +169,7 @@ def get_student_group_students(
     group_id: str,
     include_inactive: bool = False,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("student_groups.read")),
 ):
     """Like frappe api get_student_group_students: list of student, student_name in group."""
     q = db.query(StudentGroupStudent).filter(StudentGroupStudent.parent_id == group_id)

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Course, CourseAssessmentCriteria
 from app.schemas.program_course import CourseCreate, CourseUpdate, CourseResponse, CourseAssessmentCriteriaItem
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -27,7 +27,7 @@ def list_courses(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("courses.read")),
 ):
     q = db.query(Course)
     if search:
@@ -40,7 +40,7 @@ def list_courses(
 def create_course(
     body: CourseCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("courses.manage")),
 ):
     if db.query(Course).filter(Course.course_name == body.course_name).first():
         raise HTTPException(status_code=400, detail="Course name already exists")
@@ -70,7 +70,7 @@ def create_course(
 def get_course(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("courses.read")),
 ):
     c = db.query(Course).filter(Course.id == course_id).first()
     if not c:
@@ -83,7 +83,7 @@ def update_course(
     course_id: str,
     body: CourseUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("courses.manage")),
 ):
     c = db.query(Course).filter(Course.id == course_id).first()
     if not c:
@@ -111,7 +111,7 @@ def update_course(
 def get_course_assessment_criteria(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("courses.read")),
 ):
     """Return assessment criteria and weightage for course."""
     rows = db.query(CourseAssessmentCriteria).filter(CourseAssessmentCriteria.parent_id == course_id).order_by(CourseAssessmentCriteria.idx).all()

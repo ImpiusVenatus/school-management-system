@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.database import get_db
 from app.models import (
     FeeCategory,
@@ -302,7 +302,7 @@ def _apply_components(db: Session, structure_id: str, items: list[FeeComponentIt
 def list_fee_categories(
     active_only: bool | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     q = db.query(FeeCategory).order_by(FeeCategory.name)
     if active_only is True:
@@ -318,7 +318,7 @@ def list_fee_categories(
 def create_fee_category(
     body: FeeCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     cid = new_id("FCAT")
     row = FeeCategory(
@@ -342,7 +342,7 @@ def update_fee_category(
     category_id: str,
     body: FeeCategoryUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = db.query(FeeCategory).filter(FeeCategory.id == category_id).first()
     if not row:
@@ -416,7 +416,7 @@ def _build_fee_structure_board(
 def fee_structure_board(
     academic_year_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     return _build_fee_structure_board(db, academic_year_id)
 
@@ -432,7 +432,7 @@ class FeeSettingsPageResponse(BaseModel):
 def get_fee_settings_page(
     academic_year_id: str = Query(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     """Categories, structure board, and finance extras in one request."""
     _ensure_finance_defaults(db)
@@ -459,7 +459,7 @@ def get_structure_by_class(
     class_id: str,
     academic_year_id: str = Query(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     cls = db.query(K12Class).filter(K12Class.id == class_id).first()
     if not cls:
@@ -491,7 +491,7 @@ def update_fee_structure(
     structure_id: str,
     body: FeeStructureUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     fs = (
         db.query(FeeStructure)
@@ -512,7 +512,7 @@ def update_fee_structure(
 def clone_structures_year(
     body: CloneYearRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     to_classes = {
         c.name: c
@@ -577,7 +577,7 @@ def list_fee_structures(
     program_id: str | None = None,
     academic_year_id: str | None = None,
     academic_term_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     q = db.query(FeeStructure).options(joinedload(FeeStructure.components))
     if program_id:
@@ -595,7 +595,7 @@ def get_fee_structure(
     program_id: str,
     academic_term_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     q = db.query(FeeStructure).filter(FeeStructure.program_id == program_id)
     if academic_term_id:
@@ -608,7 +608,7 @@ def get_fee_structure(
 def get_fee_components(
     fee_structure_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     rows = db.query(FeeComponent).filter(FeeComponent.parent_id == fee_structure_id).order_by(FeeComponent.idx).all()
     return [{"fees_category_id": r.fees_category_id, "description": r.description, "amount": r.amount} for r in rows]
@@ -618,7 +618,7 @@ def get_fee_components(
 def create_fee_structure(
     body: FeeStructureCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     fid = new_id("FST")
     fs = FeeStructure(
@@ -646,7 +646,7 @@ def create_fee_structure(
 @router.get("/finance-extras")
 def list_finance_extras(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     """Payment methods + discount rules in one request (avoids parallel seed races)."""
     _ensure_finance_defaults(db)
@@ -664,7 +664,7 @@ def list_finance_extras(
 @router.get("/payment-methods", response_model=list[PaymentMethodResponse])
 def list_payment_methods(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     _ensure_finance_defaults(db)
     rows = db.query(PaymentMethod).order_by(PaymentMethod.sort_order, PaymentMethod.name).all()
@@ -675,7 +675,7 @@ def list_payment_methods(
 def create_payment_method(
     body: PaymentMethodCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = PaymentMethod(
         id=new_id("PAY"),
@@ -697,7 +697,7 @@ def update_payment_method(
     method_id: str,
     body: PaymentMethodUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = db.query(PaymentMethod).filter(PaymentMethod.id == method_id).first()
     if not row:
@@ -717,7 +717,7 @@ def update_payment_method(
 def delete_payment_method(
     method_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = db.query(PaymentMethod).filter(PaymentMethod.id == method_id).first()
     if not row:
@@ -733,7 +733,7 @@ def delete_payment_method(
 @router.get("/discount-rules", response_model=list[FeeDiscountRuleResponse])
 def list_discount_rules(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     rows = db.query(FeeDiscountRule).order_by(FeeDiscountRule.sort_order, FeeDiscountRule.name).all()
     return [FeeDiscountRuleResponse.model_validate(r) for r in rows]
@@ -743,7 +743,7 @@ def list_discount_rules(
 def create_discount_rule(
     body: FeeDiscountRuleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = FeeDiscountRule(
         id=new_id("DIS"),
@@ -765,7 +765,7 @@ def update_discount_rule(
     rule_id: str,
     body: FeeDiscountRuleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = db.query(FeeDiscountRule).filter(FeeDiscountRule.id == rule_id).first()
     if not row:
@@ -789,7 +789,7 @@ def update_discount_rule(
 def delete_discount_rule(
     rule_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     row = db.query(FeeDiscountRule).filter(FeeDiscountRule.id == rule_id).first()
     if not row:
@@ -807,7 +807,7 @@ def list_fee_schedules(
     db: Session = Depends(get_db),
     program_id: str | None = None,
     academic_year_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.read")),
 ):
     q = db.query(FeeSchedule)
     if program_id:
@@ -843,7 +843,7 @@ def list_fee_schedules(
 def create_fee_schedule(
     body: FeeScheduleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("fees.manage")),
 ):
     fs = db.query(FeeStructure).filter(FeeStructure.id == body.fee_structure_id).first()
     if not fs:

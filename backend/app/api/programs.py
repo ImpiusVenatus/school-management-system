@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Program, ProgramCourse, Course
 from app.schemas.program_course import ProgramCreate, ProgramUpdate, ProgramResponse, ProgramCourseItem
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -30,7 +30,7 @@ def list_programs(
     db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("programs.read")),
 ):
     rows = db.query(Program).offset(skip).limit(limit).all()
     return [_program_to_response(r, db) for r in rows]
@@ -40,7 +40,7 @@ def list_programs(
 def create_program(
     body: ProgramCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("programs.manage")),
 ):
     if db.query(Program).filter(Program.program_name == body.program_name).first():
         raise HTTPException(status_code=400, detail="Program name already exists")
@@ -73,7 +73,7 @@ def create_program(
 def get_program(
     program_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("programs.read")),
 ):
     p = db.query(Program).filter(Program.id == program_id).first()
     if not p:
@@ -86,7 +86,7 @@ def update_program(
     program_id: str,
     body: ProgramUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("programs.manage")),
 ):
     p = db.query(Program).filter(Program.id == program_id).first()
     if not p:
@@ -117,7 +117,7 @@ def update_program(
 def get_program_courses(
     program_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("programs.read")),
 ):
     """Return list of courses in this program (from Program Course table)."""
     rows = db.query(ProgramCourse).filter(ProgramCourse.parent_id == program_id).order_by(ProgramCourse.idx).all()

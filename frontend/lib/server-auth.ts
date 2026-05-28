@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, ACCESS_TOKEN_MAX_AGE_SEC, REFRESH_COOKIE } from "@/lib/auth-cookies";
 
 export const BACKEND_URL =
-  process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // Prefer explicit env; otherwise default to IPv4 loopback (Windows/Node sometimes resolves localhost to ::1)
+  process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const REFRESH_MAX_AGE_SEC = 7 * 24 * 60 * 60;
 const COOKIE_PATH = "/";
@@ -16,15 +17,20 @@ export type SessionTokens = {
 export async function refreshTokensFromRequest(req: NextRequest): Promise<SessionTokens | null> {
   const refresh = req.cookies.get(REFRESH_COOKIE)?.value;
   if (!refresh) return null;
-  const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refresh }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json().catch(() => ({}));
-  if (!data.access_token) return null;
-  return { accessToken: data.access_token, refreshToken: data.refresh_token };
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    if (!data.access_token) return null;
+    return { accessToken: data.access_token, refreshToken: data.refresh_token };
+  } catch {
+    // Backend unreachable (ECONNREFUSED, etc.)
+    return null;
+  }
 }
 
 export function applySessionCookies(response: NextResponse, tokens: SessionTokens) {
@@ -61,10 +67,15 @@ export async function resolveAccessToken(
 ): Promise<{ accessToken: string; refreshed: SessionTokens | null } | null> {
   const access = req.cookies.get(ACCESS_COOKIE)?.value;
   if (access) {
-    const me = await fetch(`${BACKEND_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${access}` },
-    });
-    if (me.ok) return { accessToken: access, refreshed: null };
+    try {
+      const me = await fetch(`${BACKEND_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${access}` },
+      });
+      if (me.ok) return { accessToken: access, refreshed: null };
+    } catch {
+      // Backend unreachable; treat as unauthenticated rather than 500
+      return null;
+    }
   }
   const refreshed = await refreshTokensFromRequest(req);
   if (!refreshed) return null;

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import StudentLeaveApplication
 from app.schemas.attendance import StudentLeaveApplicationCreate, StudentLeaveApplicationResponse
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -17,7 +17,7 @@ def list_leave_applications(
     student_id: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("leave.read")),
 ):
     q = db.query(StudentLeaveApplication)
     if student_id:
@@ -46,7 +46,7 @@ def list_leave_applications(
 def apply_leave(
     body: StudentLeaveApplicationCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("leave.manage")),
 ):
     """Apply for leave (like frappe apply_leave)."""
     from datetime import date
@@ -92,7 +92,7 @@ def apply_leave(
 def get_leave_application(
     leave_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("leave.read")),
 ):
     r = db.query(StudentLeaveApplication).filter(StudentLeaveApplication.id == leave_id).first()
     if not r:

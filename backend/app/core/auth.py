@@ -7,15 +7,18 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import User, Role
 from app.core.security import decode_access_token
+from app.config import get_settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 http_bearer = HTTPBearer(auto_error=False)
 
-_USER_CACHE_TTL_SEC = 60.0
+_USER_CACHE_TTL_SEC = float(get_settings().CURRENT_USER_CACHE_TTL_SEC or 0.0)
 _user_cache: dict[str, tuple[User, float]] = {}
 
 
 def _cache_get_user(user_id: str) -> User | None:
+    if _USER_CACHE_TTL_SEC <= 0:
+        return None
     entry = _user_cache.get(user_id)
     if not entry:
         return None
@@ -37,6 +40,8 @@ def _load_user(db: Session, user_id: str) -> User | None:
 
 def _cache_set_user(db: Session, user: User) -> None:
     """Detach user with attributes (and roles) loaded so cache survives session close."""
+    if _USER_CACHE_TTL_SEC <= 0:
+        return
     _ = user.id, user.email, user.full_name, user.is_active, user.is_superuser, user.role
     if not user.is_superuser:
         for role in user.roles:

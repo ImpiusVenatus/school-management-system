@@ -2,12 +2,26 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+
 from app.config import get_settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
+
+_BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def _password_bytes(password: str) -> bytes:
+    return password.encode("utf-8")
+
+
+def _is_password_too_long(password: str) -> bool:
+    try:
+        return len(_password_bytes(password)) > _BCRYPT_MAX_PASSWORD_BYTES
+    except Exception:
+        return True
 
 
 def create_refresh_token_value() -> str:
@@ -19,11 +33,23 @@ def hash_refresh_token(token: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password or not hashed_password:
+        return False
+    if _is_password_too_long(plain_password):
+        return False
+    try:
+        return bcrypt.checkpw(
+            _password_bytes(plain_password),
+            hashed_password.encode("utf-8"),
+        )
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    if _is_password_too_long(password):
+        raise ValueError("password too long for bcrypt (max 72 bytes)")
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(data: dict, extra: dict | None = None) -> str:

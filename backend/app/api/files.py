@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import FileRecord, User
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.services.storage import get_storage, unique_filename
 from app.services.id_gen import new_id
 
@@ -18,7 +18,7 @@ def upload_file(
     related_entity_type: str | None = None,
     related_entity_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.upload")),
 ):
     """Upload a file; optional category and related entity. Returns id, url, filename."""
     storage = get_storage()
@@ -57,7 +57,7 @@ def list_files(
     related_entity_id: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.read")),
 ):
     q = db.query(FileRecord)
     if category:
@@ -86,7 +86,7 @@ def list_files(
 def serve_file(
     file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.read")),
 ):
     """Stream file for download (auth required)."""
     rec = db.query(FileRecord).filter(FileRecord.id == file_id).first()
@@ -107,7 +107,7 @@ def serve_file(
 def get_file_metadata(
     file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.read")),
 ):
     rec = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if not rec:
@@ -128,7 +128,7 @@ def get_file_metadata(
 def download_file(
     file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.read")),
 ):
     """Download file (same as serve but with auth required)."""
     rec = db.query(FileRecord).filter(FileRecord.id == file_id).first()
@@ -149,7 +149,7 @@ def download_file(
 def delete_file(
     file_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("files.delete")),
 ):
     rec = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if not rec:

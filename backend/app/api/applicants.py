@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models import StudentApplicant, Student, ProgramEnrollment, ProgramEnrollmentCourse, CourseEnrollment
 from app.models import Program, Course, ProgramCourse
 from app.schemas.applicant import StudentApplicantCreate, StudentApplicantUpdate, StudentApplicantResponse
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id, student_name as make_student_name
 
@@ -19,7 +19,7 @@ def list_applicants(
     application_status: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("applicants.read")),
 ):
     q = db.query(StudentApplicant)
     if program_id:
@@ -61,7 +61,7 @@ def list_applicants(
 def create_applicant(
     body: StudentApplicantCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("applicants.manage")),
 ):
     aid = new_id("APP")
     title = make_student_name(body.first_name, body.middle_name, body.last_name) or body.first_name
@@ -125,7 +125,7 @@ def update_applicant(
     applicant_id: str,
     body: StudentApplicantUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("applicants.manage")),
 ):
     app = db.query(StudentApplicant).filter(StudentApplicant.id == applicant_id).first()
     if not app:
@@ -176,7 +176,7 @@ def update_applicant(
 def enroll_student(
     applicant_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("applicants.manage")),
 ):
     """Create Student and Program Enrollment from Applicant (like frappe enroll_student)."""
     app = db.query(StudentApplicant).filter(StudentApplicant.id == applicant_id).first()

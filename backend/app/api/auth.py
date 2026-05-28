@@ -120,7 +120,10 @@ def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
         RefreshToken.token_hash == token_hash,
         RefreshToken.revoked_at.is_(None),
     ).first()
-    if not row or row.expires_at < datetime.now(timezone.utc):
+    expires_at = getattr(row, "expires_at", None) if row else None
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not row or (expires_at and expires_at < datetime.now(timezone.utc)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     user = db.query(User).filter(User.id == row.user_id).first()
     if not user or not user.is_active:
@@ -150,10 +153,14 @@ def register(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only superuser can register users")
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+    try:
+        hashed = get_password_hash(body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     user = User(
         id=str(uuid.uuid4()),
         email=body.email,
-        hashed_password=get_password_hash(body.password),
+        hashed_password=hashed,
         full_name=body.full_name,
         role=body.role or "user",
     )

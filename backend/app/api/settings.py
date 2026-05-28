@@ -1,10 +1,13 @@
 """Settings API: get/update school profile (authenticated; PATCH requires permission)."""
 
 import json
+import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 
@@ -82,6 +85,194 @@ def _get_or_create_settings(db: Session) -> EducationSettings:
         db.refresh(row)
 
     return row
+
+
+def _require_settings_manage(current_user: User, db: Session) -> None:
+    if current_user.is_superuser:
+        return
+    if not user_has_permission(db, current_user, "settings.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: settings.manage")
+
+
+class HolidayRow(BaseModel):
+    id: str
+    academic_year_id: str
+    date: str
+    name: str
+    is_non_working: bool = True
+
+
+class HolidayCreate(BaseModel):
+    academic_year_id: str
+    date: str
+    name: str = Field(min_length=1, max_length=120)
+    is_non_working: bool = True
+
+
+class HolidayUpdate(BaseModel):
+    date: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    is_non_working: bool | None = None
+
+
+class PromotionPlan(BaseModel):
+    academic_year_id: str
+    auto_promote: bool = False
+    fee_carry_forward: bool = False
+    year_close_enabled: bool = False
+
+
+def _load_holidays(row: EducationSettings) -> list[dict]:
+    if not row.holidays_json:
+        return []
+    try:
+        data = json.loads(row.holidays_json)
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+def _save_holidays(row: EducationSettings, holidays: list[dict]) -> None:
+    row.holidays_json = json.dumps(holidays)
+
+
+def _load_promotion_plans(row: EducationSettings) -> dict[str, dict]:
+    if not row.promotion_plan_json:
+        return {}
+    try:
+        data = json.loads(row.promotion_plan_json)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_promotion_plans(row: EducationSettings, plans: dict[str, dict]) -> None:
+    row.promotion_plan_json = json.dumps(plans)
+
+
+def _validate_iso_date(value: str) -> None:
+    try:
+        date.fromisoformat(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail="date must be ISO format YYYY-MM-DD")
+
+
+@router.get("/holidays", response_model=list[HolidayRow])
+def list_holidays(
+    academic_year_id: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    row = _get_or_create_settings(db)
+    items = [HolidayRow.model_validate(h) for h in _load_holidays(row) if h.get("academic_year_id") == academic_year_id]
+    items.sort(key=lambda x: x.date)
+    return items
+
+
+@router.post("/holidays", response_model=HolidayRow)
+def create_holiday(
+    body: HolidayCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_settings_manage(current_user, db)
+    if not db.query(AcademicYear).filter(AcademicYear.id == body.academic_year_id).first():
+        raise HTTPException(status_code=404, detail="Academic year not found")
+    _validate_iso_date(body.date)
+    row = _get_or_create_settings(db)
+    holidays = _load_holidays(row)
+    hid = f"HOL-{uuid.uuid4().hex[:10]}"
+    rec = {
+        "id": hid,
+        "academic_year_id": body.academic_year_id,
+        "date": body.date,
+        "name": body.name.strip(),
+        "is_non_working": bool(body.is_non_working),
+    }
+    holidays.append(rec)
+    _save_holidays(row, holidays)
+    db.commit()
+    db.refresh(row)
+    return HolidayRow.model_validate(rec)
+
+
+@router.patch("/holidays/{holiday_id}", response_model=HolidayRow)
+def update_holiday(
+    holiday_id: str,
+    body: HolidayUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_settings_manage(current_user, db)
+    row = _get_or_create_settings(db)
+    holidays = _load_holidays(row)
+    found = None
+    for h in holidays:
+        if h.get("id") == holiday_id:
+            found = h
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Holiday not found")
+    if body.date is not None:
+        _validate_iso_date(body.date)
+        found["date"] = body.date
+    if body.name is not None:
+        found["name"] = body.name.strip()
+    if body.is_non_working is not None:
+        found["is_non_working"] = bool(body.is_non_working)
+    _save_holidays(row, holidays)
+    db.commit()
+    db.refresh(row)
+    return HolidayRow.model_validate(found)
+
+
+@router.delete("/holidays/{holiday_id}")
+def delete_holiday(
+    holiday_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_settings_manage(current_user, db)
+    row = _get_or_create_settings(db)
+    holidays = _load_holidays(row)
+    kept = [h for h in holidays if h.get("id") != holiday_id]
+    if len(kept) == len(holidays):
+        raise HTTPException(status_code=404, detail="Holiday not found")
+    _save_holidays(row, kept)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.get("/promotion-plan", response_model=PromotionPlan)
+def get_promotion_plan(
+    academic_year_id: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    row = _get_or_create_settings(db)
+    plans = _load_promotion_plans(row)
+    raw = plans.get(academic_year_id) or {"academic_year_id": academic_year_id}
+    return PromotionPlan.model_validate(raw)
+
+
+@router.put("/promotion-plan", response_model=PromotionPlan)
+def set_promotion_plan(
+    body: PromotionPlan,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_settings_manage(current_user, db)
+    if not db.query(AcademicYear).filter(AcademicYear.id == body.academic_year_id).first():
+        raise HTTPException(status_code=404, detail="Academic year not found")
+    row = _get_or_create_settings(db)
+    plans = _load_promotion_plans(row)
+    plans[body.academic_year_id] = body.model_dump()
+    _save_promotion_plans(row, plans)
+    db.commit()
+    db.refresh(row)
+    return body
 
 
 

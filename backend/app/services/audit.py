@@ -28,7 +28,6 @@ SKIP_PATH_PREFIXES = (
     "/openapi.json",
     "/redoc",
     "/health",
-    "/",
 )
 
 SKIP_LOG_PATHS = (
@@ -303,6 +302,8 @@ def record_request_audit(
 
 def should_audit_request(method: str, path: str) -> bool:
     if method not in MUTATING_METHODS:
+        return False
+    if path == "/":
         return False
     if any(path.startswith(p) for p in SKIP_PATH_PREFIXES):
         return False

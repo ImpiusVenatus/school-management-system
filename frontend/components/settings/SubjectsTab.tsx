@@ -132,27 +132,31 @@ export function SubjectsTab({
     [activeDepartments]
   );
 
-  const filtered = useMemo(() => {
+  const filteredK12Subjects = useMemo(() => {
+    if (schoolType !== "k12") return [] as K12Subject[];
     const q = search.trim().toLowerCase();
-    if (schoolType === "k12") {
-      return k12Subjects.filter((s) => {
-        if (deptFilter !== "all") {
-          if (deptFilter === "none") return !s.department_id;
-          if (s.department_id !== deptFilter) return false;
-        }
-        if (!q) return true;
-        return (
-          s.name.toLowerCase().includes(q) ||
-          s.code.toLowerCase().includes(q) ||
-          (s.department_name || "").toLowerCase().includes(q)
-        );
-      });
-    }
+    return k12Subjects.filter((s) => {
+      if (deptFilter !== "all") {
+        if (deptFilter === "none") return !s.department_id;
+        if (s.department_id !== deptFilter) return false;
+      }
+      if (!q) return true;
+      return (
+        s.name.toLowerCase().includes(q) ||
+        s.code.toLowerCase().includes(q) ||
+        (s.department_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [k12Subjects, search, deptFilter, schoolType]);
+
+  const filteredCourses = useMemo(() => {
+    if (schoolType === "k12") return [] as ProgramCourse[];
+    const q = search.trim().toLowerCase();
     return courses.filter((c) => {
       if (!q) return true;
       return c.course_name.toLowerCase().includes(q) || (c.department || "").toLowerCase().includes(q);
     });
-  }, [k12Subjects, courses, search, deptFilter, schoolType]);
+  }, [courses, search, schoolType]);
 
   const stats = useMemo(() => {
     if (schoolType !== "k12") return { total: courses.length, optional: 0 };
@@ -341,71 +345,75 @@ export function SubjectsTab({
       <Card className="p-0 overflow-hidden">
         {loading ? (
           <PageLoader minHeight="min-h-[12rem]" />
-        ) : filtered.length === 0 ? (
-          <p className="p-6 text-sm text-[var(--muted)]">No subjects yet. Add your first subject.</p>
         ) : schoolType === "k12" ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-light)] border-b border-[var(--border)] bg-neutral-50/80">
-                  <th className="px-4 py-3">Subject</th>
-                  <th className="px-4 py-3">Code</th>
-                  <th className="px-4 py-3">Department</th>
-                  <th className="px-4 py-3">Grades</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((s) => (
-                  <tr key={s.id} className="border-b border-[var(--border)] last:border-0 hover:bg-neutral-50/50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="w-8 h-8 rounded-lg bg-[var(--primary-light)] flex items-center justify-center text-[10px] font-bold">
-                          {s.code.slice(0, 3)}
-                        </span>
-                        <p className="font-medium">{s.name}</p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
-                    <td className="px-4 py-3">
-                      {s.department_name && s.department_id ? (
-                        <span
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${deptBadgeClass(s.department_id)}`}
-                        >
-                          {s.department_name}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">{s.grades_label || "—"}</td>
-                    <td className="px-4 py-3">
-                      {s.is_optional ? (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                          Optional
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-[var(--muted)]">Core</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button type="button" onClick={() => openEdit(s)} className={btnSecondary}>
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteSubject(s)}
-                        className="cursor-pointer ml-2 text-xs text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
-                    </td>
+          filteredK12Subjects.length === 0 ? (
+            <p className="p-6 text-sm text-[var(--muted)]">No subjects yet. Add your first subject.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-light)] border-b border-[var(--border)] bg-neutral-50/80">
+                    <th className="px-4 py-3">Subject</th>
+                    <th className="px-4 py-3">Code</th>
+                    <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Grades</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredK12Subjects.map((s) => (
+                    <tr key={s.id} className="border-b border-[var(--border)] last:border-0 hover:bg-neutral-50/50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-8 h-8 rounded-lg bg-[var(--primary-light)] flex items-center justify-center text-[10px] font-bold">
+                            {s.code.slice(0, 3)}
+                          </span>
+                          <p className="font-medium">{s.name}</p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{s.code}</td>
+                      <td className="px-4 py-3">
+                        {s.department_name && s.department_id ? (
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${deptBadgeClass(s.department_id)}`}
+                          >
+                            {s.department_name}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--muted)]">{s.grades_label || "—"}</td>
+                      <td className="px-4 py-3">
+                        {s.is_optional ? (
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                            Optional
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-[var(--muted)]">Core</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button type="button" onClick={() => openEdit(s)} className={btnSecondary}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteSubject(s)}
+                          className="cursor-pointer ml-2 text-xs text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : filteredCourses.length === 0 ? (
+          <p className="p-6 text-sm text-[var(--muted)]">No subjects yet. Add your first subject.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -416,7 +424,7 @@ export function SubjectsTab({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((c) => (
+                {filteredCourses.map((c) => (
                   <tr key={c.id} className="border-b border-[var(--border)]">
                     <td className="px-4 py-3 font-medium">{c.course_name}</td>
                     <td className="px-4 py-3 text-[var(--muted)]">{c.department || "—"}</td>

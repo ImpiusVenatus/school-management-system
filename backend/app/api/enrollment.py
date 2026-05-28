@@ -19,7 +19,7 @@ from app.schemas.enrollment import (
     ProgramEnrollmentCourseItem,
     CourseEnrollmentResponse,
 )
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -66,7 +66,7 @@ def list_enrollments(
     section_name: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("enrollments.read")),
 ):
     q = db.query(ProgramEnrollment)
     if student_id:
@@ -87,7 +87,7 @@ def list_enrollments(
 def create_enrollment(
     body: ProgramEnrollmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("enrollments.manage")),
 ):
     student = db.query(Student).filter(Student.id == body.student_id).first()
     if not student:
@@ -141,7 +141,7 @@ def create_enrollment(
 def get_enrollment(
     enrollment_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("enrollments.read")),
 ):
     e = db.query(ProgramEnrollment).filter(ProgramEnrollment.id == enrollment_id).first()
     if not e:
@@ -153,7 +153,7 @@ def get_enrollment(
 def list_course_enrollments(
     enrollment_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("enrollments.read")),
 ):
     rows = db.query(CourseEnrollment).filter(CourseEnrollment.program_enrollment_id == enrollment_id).all()
     return [

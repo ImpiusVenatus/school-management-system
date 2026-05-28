@@ -6,7 +6,7 @@ from sqlalchemy import and_
 from app.database import get_db
 from app.models import CourseSchedule, StudentGroup, Course, Room
 from app.schemas.course_schedule import CourseScheduleCreate, CourseScheduleUpdate, CourseScheduleResponse, CourseScheduleEvent
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models import User
 from app.services.id_gen import new_id
 
@@ -21,7 +21,7 @@ def list_course_schedules(
     to_date: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("course_schedules.read")),
 ):
     q = db.query(CourseSchedule)
     if student_group_id:
@@ -56,7 +56,7 @@ def get_course_schedule_events(
     end: str,
     student_group_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("course_schedules.read")),
 ):
     """Calendar events: start/end are date strings (e.g. 2024-01-01)."""
     q = db.query(CourseSchedule).filter(
@@ -85,7 +85,7 @@ def get_course_schedule_events(
 def create_course_schedule(
     body: CourseScheduleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("course_schedules.manage")),
 ):
     from app.models import Instructor
     instructor = db.query(Instructor).filter(Instructor.id == body.instructor_id).first()
@@ -130,7 +130,7 @@ def create_course_schedule(
 def get_course_schedule(
     schedule_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("course_schedules.read")),
 ):
     r = db.query(CourseSchedule).filter(CourseSchedule.id == schedule_id).first()
     if not r:
@@ -155,7 +155,7 @@ def get_course_schedule(
 def delete_course_schedule(
     schedule_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("course_schedules.manage")),
 ):
     r = db.query(CourseSchedule).filter(CourseSchedule.id == schedule_id).first()
     if not r:

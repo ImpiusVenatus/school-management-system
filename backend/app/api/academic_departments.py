@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.database import get_db
 from app.models import AcademicDepartment, K12Subject, User
 from app.schemas.academic_department import (
@@ -51,7 +51,7 @@ def _dept_response(
 def list_departments(
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.read")),
 ):
     q = db.query(AcademicDepartment)
     if active_only:
@@ -65,7 +65,7 @@ def list_departments(
 def create_department(
     body: AcademicDepartmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     name = body.name.strip()
     if db.query(AcademicDepartment).filter(func.lower(AcademicDepartment.name) == name.lower()).first():
@@ -87,7 +87,7 @@ def update_department(
     department_id: str,
     body: AcademicDepartmentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     row = db.query(AcademicDepartment).filter(AcademicDepartment.id == department_id).first()
     if not row:
@@ -115,7 +115,7 @@ def update_department(
 def delete_department(
     department_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("subjects.manage")),
 ):
     row = db.query(AcademicDepartment).filter(AcademicDepartment.id == department_id).first()
     if not row:

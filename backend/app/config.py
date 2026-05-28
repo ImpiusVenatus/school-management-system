@@ -1,4 +1,6 @@
 """Application configuration from environment."""
+from __future__ import annotations
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -19,6 +21,13 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
 
+    # Auth caching (local perf). Set 0 to disable caching.
+    CURRENT_USER_CACHE_TTL_SEC: float = 60.0
+
+    # CORS
+    # Comma-separated list, e.g. "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # File storage (local path; replace with S3 backend later if needed)
     STORAGE_PATH: str = "uploads"
 
@@ -29,4 +38,23 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    _validate_settings(s)
+    return s
+
+
+def parse_cors_origins(value: str) -> list[str]:
+    parts = [p.strip() for p in (value or "").split(",")]
+    return [p for p in parts if p]
+
+
+def _validate_settings(settings: Settings) -> None:
+    """Fail fast for unsafe production defaults."""
+    env = (settings.ENVIRONMENT or "").lower()
+    if env in ("production", "prod", "staging") and settings.SECRET_KEY.strip() in (
+        "",
+        "change-me-in-production",
+    ):
+        raise RuntimeError(
+            "Unsafe SECRET_KEY for non-dev environment. Set SECRET_KEY to a strong value."
+        )

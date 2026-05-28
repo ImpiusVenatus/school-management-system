@@ -19,6 +19,21 @@ class Club(Base):
     moderators = relationship("ClubModerator", back_populates="club", cascade="all, delete-orphan")
     members = relationship("ClubMember", back_populates="club", cascade="all, delete-orphan")
     posts = relationship("ClubPost", back_populates="club", cascade="all, delete-orphan")
+    roles = relationship("ClubRole", back_populates="club", cascade="all, delete-orphan")
+
+
+class ClubRole(Base):
+    __tablename__ = "club_roles"
+
+    id = Column(String, primary_key=True, index=True)
+    club_id = Column(String, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    academic_year_id = Column(String, nullable=False)
+    name = Column(String, nullable=False)  # e.g. President, Vice President, General Secretary
+    rank = Column(Integer, default=0)
+    is_unique = Column(Boolean, default=False)  # only one member may hold this role per club+year
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    club = relationship("Club", back_populates="roles")
 
 
 class ClubModerator(Base):
@@ -41,7 +56,11 @@ class ClubMember(Base):
     id = Column(String, primary_key=True, index=True)
     club_id = Column(String, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
     student_id = Column(String, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
-    role = Column(String, default="member")  # member, president, vice_president, general_secretary, etc.
+    # Legacy: free-text role name (kept for backward-compat with existing rows)
+    role = Column(String, default="member")
+    # New: validated, configurable officer roles per club+year
+    role_id = Column(String, ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    role_name = Column(String, nullable=True)  # denormalized label snapshot (fallback when role_id is null)
     academic_year_id = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -49,6 +68,7 @@ class ClubMember(Base):
 
     club = relationship("Club", back_populates="members")
     student = relationship("Student", backref="club_members")
+    role_def = relationship("ClubRole")
 
 
 class ClubPost(Base):
